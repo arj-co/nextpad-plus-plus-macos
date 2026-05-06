@@ -2,8 +2,14 @@
 #import "NppThemeManager.h"
 #import "PreferencesWindowController.h"
 
+@class _NppTabItem;
+
 @interface NppTabBar (ContextMenu)
 - (NSMenu *)buildTabContextMenu;
+@end
+
+@interface NppTabBar (TabItemEvents)
+- (void)tabItemMouseDown:(_NppTabItem *)item event:(NSEvent *)event;
 @end
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -288,21 +294,7 @@ static const CGFloat kPinSize = 11.0; // pin icon drawn at ~80% of original ~14p
 }
 
 - (void)mouseDown:(NSEvent *)event {
-    NSPoint p  = [self convertPoint:event.locationInWindow fromView:nil];
-    CGFloat cx = self.bounds.size.width - kCloseSize - 6;
-    BOOL closeVisible = [[NSUserDefaults standardUserDefaults] boolForKey:kPrefTabCloseButton];
-    BOOL overClose = closeVisible && (_isSelected || _hovered)
-                     && p.x >= cx && p.x <= cx + kCloseSize;
-    // Double-click anywhere on tab to close (if enabled)
-    if (!overClose && event.clickCount == 2 &&
-        [[NSUserDefaults standardUserDefaults] boolForKey:kPrefDoubleClickTabClose]) {
-        overClose = YES;
-    }
-    SEL action = overClose ? _closeAction : _selectAction;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-    [_target performSelector:action withObject:self];
-#pragma clang diagnostic pop
+    [(NppTabBar *)_target tabItemMouseDown:self event:event];
 }
 
 - (NSMenu *)menuForEvent:(NSEvent *)event {
@@ -550,6 +542,140 @@ static const CGFloat kPinSize = 11.0; // pin icon drawn at ~80% of original ~14p
 }
 
 #pragma mark - Tab item callbacks
+
+- (NSInteger)_nearestTabIndexForPoint:(NSPoint)point fallback:(NSInteger)fallback {
+    if (_items.count == 0) return fallback;
+
+    for (_NppTabItem *candidate in _items) {
+        if (NSPointInRect(point, candidate.frame)) return candidate.tabIndex;
+    }
+
+    CGFloat bestDistance = CGFLOAT_MAX;
+    NSInteger bestIndex = fallback;
+    for (_NppTabItem *candidate in _items) {
+        NSPoint center = NSMakePoint(NSMidX(candidate.frame), NSMidY(candidate.frame));
+        CGFloat dx = point.x - center.x;
+        CGFloat dy = point.y - center.y;
+        CGFloat distance = dx * dx + dy * dy * 4.0; // Prefer tabs on the same row.
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = candidate.tabIndex;
+        }
+    }
+    return bestIndex;
+}
+
+- (void)moveTabAtIndex:(NSInteger)fromIndex toIndex:(NSInteger)toIndex {
+    NSInteger count = (NSInteger)_items.count;
+    if (fromIndex < 0 || fromIndex >= count ||
+        toIndex < 0 || toIndex >= count ||
+        fromIndex == toIndex) return;
+
+    _NppTabItem *movingItem = _items[fromIndex];
+    [_items removeObjectAtIndex:(NSUInteger)fromIndex];
+    [_items insertObject:movingItem atIndex:(NSUInteger)toIndex];
+
+    if (_selectedIndex == fromIndex) {
+        _selectedIndex = toIndex;
+    } else if (fromIndex < _selectedIndex && _selectedIndex <= toIndex) {
+        _selectedIndex--;
+    } else if (toIndex <= _selectedIndex && _selectedIndex < fromIndex) {
+        _selectedIndex++;
+    }
+
+    for (NSInteger i = 0; i < (NSInteger)_items.count; i++) {
+        _items[i].tabIndex = i;
+        _items[i].isSelected = (i == _selectedIndex);
+    }
+    [self relayout];
+}
+
+- (NSImage *)_dragImageForTabItem:(_NppTabItem *)item {
+    NSBitmapImageRep *rep = [item bitmapImageRepForCachingDisplayInRect:item.bounds];
+    if (!rep) return nil;
+    [item cacheDisplayInRect:item.bounds toBitmapImageRep:rep];
+
+    NSImage *image = [[NSImage alloc] initWithSize:item.bounds.size];
+    [image addRepresentation:rep];
+    return image;
+}
+
+- (void)tabItemMouseDown:(_NppTabItem *)item event:(NSEvent *)event {
+    NSPoint p  = [item convertPoint:event.locationInWindow fromView:nil];
+    CGFloat cx = item.bounds.size.width - kCloseSize - 6;
+    BOOL closeVisible = [[NSUserDefaults standardUserDefaults] boolForKey:kPrefTabCloseButton];
+    BOOL overClose = closeVisible && p.x >= cx && p.x <= cx + kCloseSize;
+    // Double-click anywhere on tab to close (if enabled)
+    if (!overClose && event.clickCount == 2 &&
+        [[NSUserDefaults standardUserDefaults] boolForKey:kPrefDoubleClickTabClose]) {
+        overClose = YES;
+    }
+
+    if (overClose) {
+        [self tabItemClosed:item];
+        return;
+    }
+
+    NSInteger fromIndex = item.tabIndex;
+    NSInteger toIndex = fromIndex;
+    BOOL dragging = NO;
+    NSPoint downPoint = [_containerView convertPoint:event.locationInWindow fromView:nil];
+    NSPoint dragOffsetInItem = [item convertPoint:event.locationInWindow fromView:nil];
+    NSImageView *dragGhost = nil;
+    const CGFloat dragThreshold = 4.0;
+
+    while (YES) {
+        NSEvent *nextEvent = [self.window nextEventMatchingMask:(NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp)];
+        if (!nextEvent) break;
+
+        NSPoint currentPoint = [_containerView convertPoint:nextEvent.locationInWindow fromView:nil];
+        if (nextEvent.type == NSEventTypeLeftMouseDragged) {
+            CGFloat dx = currentPoint.x - downPoint.x;
+            CGFloat dy = currentPoint.y - downPoint.y;
+            if (!dragging && hypot(dx, dy) >= dragThreshold) dragging = YES;
+            if (dragging) {
+                if (!dragGhost) {
+                    NSImage *image = [self _dragImageForTabItem:item];
+                    if (image) {
+                        dragGhost = [[NSImageView alloc] initWithFrame:[self convertRect:item.bounds fromView:item]];
+                        dragGhost.image = image;
+                        dragGhost.imageScaling = NSImageScaleAxesIndependently;
+                        dragGhost.alphaValue = 0.65;
+                        dragGhost.wantsLayer = YES;
+                        dragGhost.layer.shadowOpacity = 0.25;
+                        dragGhost.layer.shadowRadius = 4.0;
+                        dragGhost.layer.shadowOffset = NSMakeSize(0, -2);
+                        [self addSubview:dragGhost positioned:NSWindowAbove relativeTo:nil];
+                    }
+                    item.alphaValue = 0.35;
+                }
+                NSPoint ghostPoint = [self convertPoint:nextEvent.locationInWindow fromView:nil];
+                dragGhost.frame = NSMakeRect(ghostPoint.x - dragOffsetInItem.x,
+                                             ghostPoint.y - dragOffsetInItem.y,
+                                             item.bounds.size.width,
+                                             item.bounds.size.height);
+                toIndex = [self _nearestTabIndexForPoint:currentPoint fallback:toIndex];
+            }
+            continue;
+        }
+
+        if (nextEvent.type == NSEventTypeLeftMouseUp) break;
+    }
+
+    item.alphaValue = 1.0;
+    [dragGhost removeFromSuperview];
+
+    if (dragging && toIndex != fromIndex) {
+        [self moveTabAtIndex:fromIndex toIndex:toIndex];
+        [self selectTabAtIndex:toIndex];
+        if ([self.delegate respondsToSelector:@selector(tabBar:didMoveTabFromIndex:toIndex:)])
+            [self.delegate tabBar:self didMoveTabFromIndex:fromIndex toIndex:toIndex];
+        [self.delegate tabBar:self didSelectTabAtIndex:toIndex];
+        return;
+    }
+
+    [self tabItemSelected:item];
+}
 
 - (void)tabItemSelected:(_NppTabItem *)item {
     if (item.tabIndex != _selectedIndex)

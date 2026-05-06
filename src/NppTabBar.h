@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)tabBar:(NppTabBar *)bar didSelectTabAtIndex:(NSInteger)index;
 - (void)tabBar:(NppTabBar *)bar didCloseTabAtIndex:(NSInteger)index;
 @optional
+- (void)tabBar:(NppTabBar *)bar didMoveTabFromIndex:(NSInteger)fromIndex toIndex:(NSInteger)toIndex;
 /// Fires when the user double-clicks empty space to the right of the last
 /// tab (or below the last row in wrap mode). Implementer typically opens
 /// a new untitled tab in the tab manager that owns `bar`. Optional — bars
