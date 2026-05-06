@@ -3517,19 +3517,49 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
     conflictLabel.maximumNumberOfLines = 2;
     [cv addSubview:conflictLabel];
 
-    // Live conflict check — reuse ShortcutMapper's logic
+    // OK / Cancel — created before the checkConflict block so the block
+    // can hold a strong reference and toggle btnOK.enabled live as the
+    // user changes modifiers / key. This pairs with the conflict label
+    // to make collisions impossible to silently bypass: warning text +
+    // disabled OK = the user must clear or pick a non-conflicting
+    // shortcut before they can save the macro.
+    NSButton *btnOK = [[NSButton alloc] initWithFrame:NSMakeRect(195, 12, 90, 28)];
+    btnOK.title = [[NppLocalizer shared] translate:@"OK"];
+    btnOK.bezelStyle = NSBezelStyleRounded;
+    btnOK.keyEquivalent = @"\r";
+    btnOK.target = NSApp;
+    btnOK.action = @selector(stopModal);
+    [cv addSubview:btnOK];
+
+    NSButton *btnCancel = [[NSButton alloc] initWithFrame:NSMakeRect(293, 12, 90, 28)];
+    btnCancel.title = [[NppLocalizer shared] translate:@"Cancel"];
+    btnCancel.bezelStyle = NSBezelStyleRounded;
+    btnCancel.keyEquivalent = @"\033";
+    btnCancel.target = NSApp;
+    btnCancel.action = @selector(abortModal);
+    [cv addSubview:btnCancel];
+
+    // Live conflict check — walks every top-level menu (including the
+    // App menu so ⌘H / ⌘Q / ⌘, are caught) and flags items that share
+    // the candidate modifier+key combo.
     void (^checkConflict)(void) = ^{
         NSString *keyName = keyPopup.titleOfSelectedItem;
-        if ([keyName isEqualToString:@"None"]) { conflictLabel.stringValue = @""; return; }
+        if ([keyName isEqualToString:@"None"]) {
+            conflictLabel.stringValue = @"";
+            btnOK.enabled = YES;          // no key → no possible conflict
+            return;
+        }
         NSUInteger keyCode = 0;
         if (keyName.length == 1) keyCode = [keyName characterAtIndex:0];
         else if ([keyName hasPrefix:@"F"]) keyCode = 111 + [keyName substringFromIndex:1].intValue;
-        if (keyCode == 0) { conflictLabel.stringValue = @""; return; }
+        if (keyCode == 0) {
+            conflictLabel.stringValue = @"";
+            btnOK.enabled = YES;
+            return;
+        }
 
         // Walk all menus checking for conflicts
-        BOOL conflict = NO;
         NSMutableString *msg = [NSMutableString string];
-        void (^checkMenu)(NSMenu *, NSString *) = ^(NSMenu *menu, NSString *cat) {};
         __block void (^checkMenuBlock)(NSMenu *, NSString *);
         checkMenuBlock = ^(NSMenu *menu, NSString *cat) {
             for (NSMenuItem *mi in menu.itemArray) {
@@ -3559,9 +3589,11 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
         if (msg.length) {
             conflictLabel.textColor = [NSColor systemRedColor];
             conflictLabel.stringValue = msg;
+            btnOK.enabled = NO;          // collision → block save
         } else {
             conflictLabel.textColor = [NSColor secondaryLabelColor];
             conflictLabel.stringValue = [[NppLocalizer shared] translate:@"No shortcut conflicts."];
+            btnOK.enabled = YES;
         }
     };
 
@@ -3580,22 +3612,8 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
     keyPopup.action = @selector(main);
     [targetOps addObject:keyOp];
 
-    // OK / Cancel
-    NSButton *btnOK = [[NSButton alloc] initWithFrame:NSMakeRect(195, 12, 90, 28)];
-    btnOK.title = [[NppLocalizer shared] translate:@"OK"];
-    btnOK.bezelStyle = NSBezelStyleRounded;
-    btnOK.keyEquivalent = @"\r";
-    btnOK.target = NSApp;
-    btnOK.action = @selector(stopModal);
-    [cv addSubview:btnOK];
-
-    NSButton *btnCancel = [[NSButton alloc] initWithFrame:NSMakeRect(293, 12, 90, 28)];
-    btnCancel.title = [[NppLocalizer shared] translate:@"Cancel"];
-    btnCancel.bezelStyle = NSBezelStyleRounded;
-    btnCancel.keyEquivalent = @"\033";
-    btnCancel.target = NSApp;
-    btnCancel.action = @selector(abortModal);
-    [cv addSubview:btnCancel];
+    // Initial check (also sets btnOK.enabled to its starting state)
+    checkConflict();
 
     NSModalResponse resp = [NSApp runModalForWindow:panel];
     [panel orderOut:nil];
@@ -7034,18 +7052,42 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
     conflictLabel.maximumNumberOfLines = 2;
     [cv addSubview:conflictLabel];
 
+    // OK / Cancel — created early so the conflict-check block can hold a
+    // strong reference and toggle btnOK.enabled live (same gating pattern
+    // as the macro Save and Shortcut Mapper Modify dialogs).
+    NSButton *btnOK = [[NSButton alloc] initWithFrame:NSMakeRect(195, 12, 90, 28)];
+    btnOK.title = [[NppLocalizer shared] translate:@"OK"];
+    btnOK.bezelStyle = NSBezelStyleRounded;
+    btnOK.keyEquivalent = @"\r";
+    btnOK.target = NSApp;
+    btnOK.action = @selector(stopModal);
+    [cv addSubview:btnOK];
+
+    NSButton *btnCancel = [[NSButton alloc] initWithFrame:NSMakeRect(293, 12, 90, 28)];
+    btnCancel.title = [[NppLocalizer shared] translate:@"Cancel"];
+    btnCancel.bezelStyle = NSBezelStyleRounded;
+    btnCancel.keyEquivalent = @"\033";
+    btnCancel.target = NSApp;
+    btnCancel.action = @selector(abortModal);
+    [cv addSubview:btnCancel];
+
     // Live conflict check
     void (^checkConflict)(void) = ^{
         NSString *keyName = keyPopup.titleOfSelectedItem;
         if ([keyName isEqualToString:@"None"]) {
             conflictLabel.textColor = [NSColor secondaryLabelColor];
             conflictLabel.stringValue = @"";
+            btnOK.enabled = YES;
             return;
         }
         NSUInteger keyCode = 0;
         if (keyName.length == 1) keyCode = [keyName characterAtIndex:0];
         else if ([keyName hasPrefix:@"F"]) keyCode = 111 + [keyName substringFromIndex:1].intValue;
-        if (keyCode == 0) { conflictLabel.stringValue = @""; return; }
+        if (keyCode == 0) {
+            conflictLabel.stringValue = @"";
+            btnOK.enabled = YES;
+            return;
+        }
 
         NSMutableString *msg = [NSMutableString string];
         __block void (^checkMenuBlock)(NSMenu *, NSString *);
@@ -7076,9 +7118,11 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
         if (msg.length) {
             conflictLabel.textColor = [NSColor systemRedColor];
             conflictLabel.stringValue = msg;
+            btnOK.enabled = NO;          // collision → block save
         } else {
             conflictLabel.textColor = [NSColor secondaryLabelColor];
             conflictLabel.stringValue = [[NppLocalizer shared] translate:@"No shortcut conflicts."];
+            btnOK.enabled = YES;
         }
     };
 
@@ -7097,22 +7141,8 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
     keyPopup.action = @selector(main);
     [targetOps addObject:keyOp];
 
-    // OK / Cancel
-    NSButton *btnOK = [[NSButton alloc] initWithFrame:NSMakeRect(195, 12, 90, 28)];
-    btnOK.title = [[NppLocalizer shared] translate:@"OK"];
-    btnOK.bezelStyle = NSBezelStyleRounded;
-    btnOK.keyEquivalent = @"\r";
-    btnOK.target = NSApp;
-    btnOK.action = @selector(stopModal);
-    [cv addSubview:btnOK];
-
-    NSButton *btnCancel = [[NSButton alloc] initWithFrame:NSMakeRect(293, 12, 90, 28)];
-    btnCancel.title = [[NppLocalizer shared] translate:@"Cancel"];
-    btnCancel.bezelStyle = NSBezelStyleRounded;
-    btnCancel.keyEquivalent = @"\033";
-    btnCancel.target = NSApp;
-    btnCancel.action = @selector(abortModal);
-    [cv addSubview:btnCancel];
+    // Initial check (also sets btnOK.enabled to its starting state)
+    checkConflict();
 
     NSModalResponse resp = [NSApp runModalForWindow:panel];
     [panel orderOut:nil];

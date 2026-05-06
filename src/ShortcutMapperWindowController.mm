@@ -340,12 +340,17 @@ NSNotificationName const NPPShortcutsChangedNotification = @"NPPShortcutsChanged
 
     for (NSUInteger i = 0; i < mainMenu.itemArray.count; i++) {
         NSMenuItem *topItem = mainMenu.itemArray[i];
-        // Skip the Apple/App menu (always index 0)
-        if (i == 0) continue;
         if (!topItem.submenu) continue;
 
-        // The menu name is the submenu's title (topItem.title may return class name)
+        // The menu name is the submenu's title (topItem.title may return class name).
+        // The App menu (index 0) has an empty submenu.title — fall through to the
+        // "Application" label so its entries (Hide / Quit / Preferences / etc.) appear
+        // in a recognisable category. We deliberately INCLUDE the App menu now so the
+        // conflict checker can spot collisions with ⌘H / ⌘Q / ⌘, / ⌘M instead of
+        // silently letting users rebind something to one of those system shortcuts.
         NSString *category = topItem.submenu.title;
+        if (i == 0 && (!category.length || [category isEqualToString:@"NSMenuItem"]))
+            category = @"Application";
         if (!category.length) category = topItem.title;
         if (!category.length || [category isEqualToString:@"NSMenuItem"]) category = @"Other";
 
@@ -399,16 +404,24 @@ NSNotificationName const NPPShortcutsChangedNotification = @"NPPShortcutsChanged
 }
 
 - (void)_walkMenu:(NSMenu *)menu category:(NSString *)category {
-    // Selectors to skip (dynamic/non-command items)
+    // Selectors to skip (dynamic / repeated items where adding entries would
+    // pollute the table or fire phantom conflicts):
+    //   • openRecentFile:  — recent-files items vary per session
+    //   • runSavedMacro:   — already covered by the Macros tab
+    //   • pluginMenuAction: / pluginToolbarAction: — already covered by Plugins tab
+    //   • submenuAction:   — internal Cocoa wrapper for parent submenu items
+    //   • _showAllCharsDropdown: — dynamic toolbar dropdown anchor
+    //
+    // System selectors (hide:, terminate:, performMiniaturize:, etc.) are
+    // INTENTIONALLY left in the table so the conflict checker can detect
+    // collisions with ⌘H, ⌘Q, ⌘M, ⌃⌘F, etc. They appear in the "Application"
+    // / "Window" categories and are reassignable like any other shortcut.
     static NSSet *skipSelectors;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         skipSelectors = [NSSet setWithObjects:
             @"openRecentFile:", @"runSavedMacro:", @"pluginMenuAction:",
             @"pluginToolbarAction:", @"submenuAction:", @"_showAllCharsDropdown:",
-            @"orderFrontStandardAboutPanel:", @"hide:", @"hideOtherApplications:",
-            @"unhideAllApplications:", @"terminate:", @"performMiniaturize:",
-            @"performZoom:", @"toggleFullScreen:", @"arrangeInFront:",
             nil];
     });
 
@@ -937,11 +950,37 @@ NSNotificationName const NPPShortcutsChangedNotification = @"NPPShortcutsChanged
     conflictLabel.maximumNumberOfLines = 2;
     [cv addSubview:conflictLabel];
 
+    // OK button is created up here (instead of below the checkConflict
+    // block) so the conflict-check block can hold a strong reference and
+    // toggle its enabled state live. Disabling OK when a conflict is
+    // detected is the user-facing half of the "no silent collisions" rule:
+    // the warning label tells the user what's wrong, and the disabled OK
+    // forces them to pick something non-conflicting (or "None") before
+    // saving. The block-operation wiring further down then fires
+    // checkConflict on every modifier or key change, keeping enabled in
+    // sync with whatever the user is currently picking.
+    NSButton *btnOK = [[NSButton alloc] initWithFrame:NSMakeRect(195, 12, 90, 28)];
+    btnOK.title = [[NppLocalizer shared] translate:@"OK"]; btnOK.bezelStyle = NSBezelStyleRounded;
+    btnOK.keyEquivalent = @"\r"; btnOK.target = NSApp; btnOK.action = @selector(stopModal);
+    [cv addSubview:btnOK];
+
+    NSButton *btnCancel = [[NSButton alloc] initWithFrame:NSMakeRect(293, 12, 90, 28)];
+    btnCancel.title = [[NppLocalizer shared] translate:@"Cancel"]; btnCancel.bezelStyle = NSBezelStyleRounded;
+    btnCancel.keyEquivalent = @"\033"; btnCancel.target = NSApp; btnCancel.action = @selector(abortModal);
+    [cv addSubview:btnCancel];
+
     // Live conflict check block
     __weak ShortcutMapperWindowController *weakSelf = self;
     void (^checkConflict)(void) = ^{
         NSUInteger keyCode = [ShortcutEntry keyCodeForName:keyPopup.titleOfSelectedItem];
-        if (keyCode == 0) { conflictLabel.stringValue = @""; return; }
+        if (keyCode == 0) {
+            // No key picked → no shortcut → "no conflict" is the correct
+            // resting state, and OK must be enabled so the user can save
+            // a cleared / never-set entry.
+            conflictLabel.stringValue = @"";
+            btnOK.enabled = YES;
+            return;
+        }
 
         // Build a temporary entry to check against
         ShortcutEntry *test = [[ShortcutEntry alloc] init];
@@ -955,9 +994,11 @@ NSNotificationName const NPPShortcutsChangedNotification = @"NPPShortcutsChanged
         if (conflicts.length) {
             conflictLabel.textColor = [NSColor systemRedColor];
             conflictLabel.stringValue = [NSString stringWithFormat:[[NppLocalizer shared] translate:@"CONFLICT: %@"], conflicts];
+            btnOK.enabled = NO;
         } else {
             conflictLabel.textColor = [NSColor secondaryLabelColor];
             conflictLabel.stringValue = [[NppLocalizer shared] translate:@"No shortcut conflicts."];
+            btnOK.enabled = YES;
         }
     };
 
@@ -981,19 +1022,8 @@ NSNotificationName const NPPShortcutsChangedNotification = @"NPPShortcutsChanged
     keyPopup.action = @selector(main);
     [targetOps addObject:keyOp];
 
-    // Initial check
+    // Initial check (also sets btnOK.enabled to its starting state)
     checkConflict();
-
-    // Buttons
-    NSButton *btnOK = [[NSButton alloc] initWithFrame:NSMakeRect(195, 12, 90, 28)];
-    btnOK.title = [[NppLocalizer shared] translate:@"OK"]; btnOK.bezelStyle = NSBezelStyleRounded;
-    btnOK.keyEquivalent = @"\r"; btnOK.target = NSApp; btnOK.action = @selector(stopModal);
-    [cv addSubview:btnOK];
-
-    NSButton *btnCancel = [[NSButton alloc] initWithFrame:NSMakeRect(293, 12, 90, 28)];
-    btnCancel.title = [[NppLocalizer shared] translate:@"Cancel"]; btnCancel.bezelStyle = NSBezelStyleRounded;
-    btnCancel.keyEquivalent = @"\033"; btnCancel.target = NSApp; btnCancel.action = @selector(abortModal);
-    [cv addSubview:btnCancel];
 
     NSModalResponse resp = [NSApp runModalForWindow:panel];
     [panel orderOut:nil];
