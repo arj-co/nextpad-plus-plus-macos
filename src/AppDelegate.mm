@@ -440,15 +440,18 @@
     }
 
     // ── PluginCommands ──
-    for (NSXMLElement *pc in [doc nodesForXPath:@"//PluginCommands/PluginCommand" error:nil]) {
-        NSString *pluginName = [[pc attributeForName:@"moduleName"] stringValue];
-        NSInteger internalID = [[[pc attributeForName:@"internalID"] stringValue] integerValue];
-        // Find the plugin menu item by walking Plugins menu
-        NSMenu *mainMenu = [NSApp mainMenu];
-        for (NSMenuItem *topItem in mainMenu.itemArray) {
-            NSString *menuTitle = topItem.submenu.title ?: topItem.title;
-            if (![menuTitle isEqualToString:@"Plugins"]) continue;
-            for (NSMenuItem *pluginItem in topItem.submenu.itemArray) {
+    // Look up the Plugins / Macro / Run top-level menus by tag rather than
+    // English title — when the user runs in a non-English locale the menu
+    // titles are translated by NppLocalizer (e.g. "Плагины", "Макрос",
+    // "Запустить"), and an isEqualToString:@"Plugins" check would silently
+    // skip the entire shortcut-override pass. Tags are assigned in
+    // MenuBuilder at build time and survive translation.
+    NSMenu *pluginsMenu = [[[NSApp mainMenu] itemWithTag:kMenuTagPlugins] submenu];
+    if (pluginsMenu) {
+        for (NSXMLElement *pc in [doc nodesForXPath:@"//PluginCommands/PluginCommand" error:nil]) {
+            NSString *pluginName = [[pc attributeForName:@"moduleName"] stringValue];
+            NSInteger internalID = [[[pc attributeForName:@"internalID"] stringValue] integerValue];
+            for (NSMenuItem *pluginItem in pluginsMenu.itemArray) {
                 if (![pluginItem.title isEqualToString:pluginName]) continue;
                 if (!pluginItem.submenu) continue;
                 NSInteger cmdIdx = 0;
@@ -462,49 +465,41 @@
                     cmdIdx++;
                 }
             }
-            break;
+            nextPlugin:;
         }
-        nextPlugin:;
     }
 
     // ── Macro shortcuts ──
-    for (NSXMLElement *mc in [doc nodesForXPath:@"//Macros/Macro" error:nil]) {
-        NSString *macroName = [[mc attributeForName:@"name"] stringValue];
-        NSUInteger keyCode = [[[mc attributeForName:@"Key"] stringValue] integerValue];
-        if (keyCode == 0) continue;
-        // Find macro menu item by title
-        NSMenu *mainMenu = [NSApp mainMenu];
-        for (NSMenuItem *topItem in mainMenu.itemArray) {
-            NSString *menuTitle = topItem.submenu.title ?: topItem.title;
-            if (![menuTitle isEqualToString:@"Macro"]) continue;
-            for (NSMenuItem *mi in topItem.submenu.itemArray) {
+    NSMenu *macroMenu = [[[NSApp mainMenu] itemWithTag:kMenuTagMacro] submenu];
+    if (macroMenu) {
+        for (NSXMLElement *mc in [doc nodesForXPath:@"//Macros/Macro" error:nil]) {
+            NSString *macroName = [[mc attributeForName:@"name"] stringValue];
+            NSUInteger keyCode = [[[mc attributeForName:@"Key"] stringValue] integerValue];
+            if (keyCode == 0) continue;
+            for (NSMenuItem *mi in macroMenu.itemArray) {
                 if ([mi.title isEqualToString:macroName]) {
                     applyOverride(mc, mi);
                     totalApplied++;
                     break;
                 }
             }
-            break;
         }
     }
 
     // ── Run Commands (UserDefinedCommands) ──
-    for (NSXMLElement *rc in [doc nodesForXPath:@"//UserDefinedCommands/Command" error:nil]) {
-        NSString *cmdName = [[rc attributeForName:@"name"] stringValue];
-        NSUInteger keyCode = [[[rc attributeForName:@"Key"] stringValue] integerValue];
-        if (keyCode == 0 || !cmdName.length) continue;
-        NSMenu *mainMenu = [NSApp mainMenu];
-        for (NSMenuItem *topItem in mainMenu.itemArray) {
-            NSString *menuTitle = topItem.submenu.title ?: topItem.title;
-            if (![menuTitle isEqualToString:@"Run"]) continue;
-            for (NSMenuItem *mi in topItem.submenu.itemArray) {
+    NSMenu *runMenu = [[[NSApp mainMenu] itemWithTag:kMenuTagRun] submenu];
+    if (runMenu) {
+        for (NSXMLElement *rc in [doc nodesForXPath:@"//UserDefinedCommands/Command" error:nil]) {
+            NSString *cmdName = [[rc attributeForName:@"name"] stringValue];
+            NSUInteger keyCode = [[[rc attributeForName:@"Key"] stringValue] integerValue];
+            if (keyCode == 0 || !cmdName.length) continue;
+            for (NSMenuItem *mi in runMenu.itemArray) {
                 if ([mi.title isEqualToString:cmdName]) {
                     applyOverride(rc, mi);
                     totalApplied++;
                     break;
                 }
             }
-            break;
         }
     }
 

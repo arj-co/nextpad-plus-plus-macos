@@ -249,7 +249,13 @@ static NSString *normalizeForLookup(NSString *s) {
     NSString *key = normalizeForLookup(english);
     NSString *translated = self.translationMap[key];
     // Uncomment for debug: if (!translated) NSLog(@"[NppLocalizer] MISS: \"%@\"", english);
-    return translated ?: english;
+    // Fallback (no translation found) goes through stripAccelerators so
+    // Win32-style "&&" → "&" cleanup applies for English-only display too.
+    // Translated values are already pre-stripped during map building.
+    // Implicit contract for callers: use Win32-style "&&" for a literal
+    // ampersand; a lone "&" is treated as a Win32 mnemonic and dropped
+    // (matches how the translationMap lookup keys are normalized).
+    return translated ?: stripAccelerators(english);
 }
 
 - (NSString *)miscString:(NSString *)key {

@@ -1,5 +1,11 @@
 #import "MenuBuilder.h"
 
+// Top-level menu-item tags. See MenuBuilder.h for rationale.
+const NSInteger kMenuTagMacro    = 9900;
+const NSInteger kMenuTagRun      = 9902;
+const NSInteger kMenuTagLanguage = 9904;
+const NSInteger kMenuTagPlugins  = 9905;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 static NSMenuItem *item(NSString *title, SEL sel, NSString *key) {
@@ -804,6 +810,7 @@ static NSMenu *buildLanguageMenu() {
 
     // ── Language ──────────────────────────────────────────────────────────────
     NSMenuItem *langMenuTop = [[NSMenuItem alloc] init];
+    langMenuTop.tag = kMenuTagLanguage; // localization-stable lookup key
     [main addItem:langMenuTop];
     langMenuTop.submenu = buildLanguageMenu();
     langMenuTop.submenu.title = @"Language";
@@ -857,7 +864,7 @@ static NSMenu *buildLanguageMenu() {
 
     // ── Macro ─────────────────────────────────────────────────────────────────
     NSMenuItem *macroItem = [[NSMenuItem alloc] init];
-    macroItem.tag = 9900; // used by rebuildMacroMenu to find this menu
+    macroItem.tag = kMenuTagMacro; // used by rebuildMacroMenu to find this menu
     [main addItem:macroItem];
     NSMenu *macroMenu = submenu(@"Macro");
     macroItem.submenu = macroMenu;
@@ -882,7 +889,7 @@ static NSMenu *buildLanguageMenu() {
 
     // ── Run ───────────────────────────────────────────────────────────────────
     NSMenuItem *runItem = [[NSMenuItem alloc] init];
-    runItem.tag = 9902; // used by rebuildRunMenu to find this menu
+    runItem.tag = kMenuTagRun; // used by rebuildRunMenu to find this menu
     [main addItem:runItem];
     NSMenu *runMenu = submenu(@"Run");
     runItem.submenu = runMenu;
@@ -895,6 +902,7 @@ static NSMenu *buildLanguageMenu() {
 
     // ── Plugins ───────────────────────────────────────────────────────────────
     NSMenuItem *pluginsItem = [[NSMenuItem alloc] init];
+    pluginsItem.tag = kMenuTagPlugins; // localization-stable lookup key
     [main addItem:pluginsItem];
     NSMenu *pluginsMenu = submenu(@"Plugins");
     pluginsItem.submenu = pluginsMenu;

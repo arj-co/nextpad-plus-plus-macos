@@ -5779,14 +5779,14 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
 /// Inserts them after the last separator in the Language menu
 /// (below the static Markdown preinstalled entries).
 - (void)rebuildUDLLanguageMenu {
-    // Find the Language menu
-    NSMenu *langMenu = nil;
-    for (NSMenuItem *topItem in [NSApp mainMenu].itemArray) {
-        if ([topItem.submenu.title isEqualToString:@"Language"]) {
-            langMenu = topItem.submenu;
-            break;
-        }
-    }
+    // Look up the Language top-level menu by tag, not by its English title:
+    // when the active UI language is non-English the title is translated
+    // (e.g. "Синтаксисы" / "Мова" / "Langage"), and an
+    // isEqualToString:@"Language" check would silently miss and skip the
+    // entire UDL insertion — losing every ~/.notepad++/userDefineLangs/
+    // entry from the menu.
+    NSMenuItem *langTop = [[NSApp mainMenu] itemWithTag:kMenuTagLanguage];
+    NSMenu *langMenu = langTop.submenu;
     if (!langMenu) return;
 
     // Remove any previously-added UDL items (tagged with 8800)

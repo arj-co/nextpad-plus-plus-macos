@@ -256,7 +256,7 @@ static void addFoldFields(NSBox *box, NSScrollView **oO, NSScrollView **oM, NSSc
 
 - (NSTabViewItem *)_tab1 {
     NppLocalizer *loc = [NppLocalizer shared];
-    NSTabViewItem *t = [[NSTabViewItem alloc] initWithIdentifier:@"f"]; t.label = [loc translate:@"Folder & Default"];
+    NSTabViewItem *t = [[NSTabViewItem alloc] initWithIdentifier:@"f"]; t.label = [loc translate:@"Folder && Default"];
     NSView *c = scrollableTab(t, 650);
     CGFloat W = 700, hw = W/2 - 16, y = 8;
 
@@ -357,7 +357,7 @@ static void addFoldFields(NSBox *box, NSScrollView **oO, NSScrollView **oM, NSSc
 
 - (NSTabViewItem *)_tab3 {
     NppLocalizer *loc = [NppLocalizer shared];
-    NSTabViewItem *t = [[NSTabViewItem alloc] initWithIdentifier:@"c"]; t.label = [loc translate:@"Comment & Number"];
+    NSTabViewItem *t = [[NSTabViewItem alloc] initWithIdentifier:@"c"]; t.label = [loc translate:@"Comment && Number"];
     CGFloat W = 700, hw = W/2 - 16;
     NSView *c = scrollableTab(t, 800);
     CGFloat y = 8;
@@ -468,7 +468,7 @@ static void addFoldFields(NSBox *box, NSScrollView **oO, NSScrollView **oM, NSSc
 
 - (NSTabViewItem *)_tab4 {
     NppLocalizer *loc = [NppLocalizer shared];
-    NSTabViewItem *t = [[NSTabViewItem alloc] initWithIdentifier:@"o"]; t.label = [loc translate:@"Operators & Delimiters"];
+    NSTabViewItem *t = [[NSTabViewItem alloc] initWithIdentifier:@"o"]; t.label = [loc translate:@"Operators && Delimiters"];
     CGFloat W = 700, hw = W/2 - 16, dH = 98;
     NSView *c = scrollableTab(t, 130 + 4 * (dH + 6) + 10);
     CGFloat y = 8;

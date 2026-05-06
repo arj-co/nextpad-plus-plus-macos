@@ -1,5 +1,6 @@
 #import "NppPluginManager.h"
 #import "MainWindowController.h"
+#import "MenuBuilder.h"        // kMenuTagPlugins
 #import "PreferencesWindowController.h"
 #import "TabManager.h"
 #import "EditorView.h"
@@ -1369,13 +1370,11 @@ static intptr_t _npp_run_on_main(intptr_t (^block)(void)) {
 // ── Menu helpers ────────────────────────────────────────────────────────
 
 - (nullable NSMenu *)findPluginsMenu {
-    NSMenu *mainMenu = [NSApp mainMenu];
-    for (NSMenuItem *item in mainMenu.itemArray) {
-        if ([item.title isEqualToString:@"Plugins"] ||
-            [item.submenu.title isEqualToString:@"Plugins"])
-            return item.submenu;
-    }
-    return nil;
+    // Tag-based lookup is required because the menu's English title is
+    // overwritten with the active language's translation (e.g. "Плагины")
+    // before any plugin command registration runs, so a title-based scan
+    // would silently fail and the plugin's commands would never appear.
+    return [[[NSApp mainMenu] itemWithTag:kMenuTagPlugins] submenu];
 }
 
 - (nullable NSMenuItem *)findMenuItemWithTag:(int)tag inMenu:(NSMenu *)menu {

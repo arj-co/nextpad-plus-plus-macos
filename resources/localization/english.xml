@@ -906,7 +906,7 @@ Translation note:
 					<Item id="23246" name="Comma"/>
 					<Item id="23247" name="Both"/>
 				</Comment>
-				<Operator title="Operators &amp;&amp; Delimiter">
+				<Operator title="Operators &amp;&amp; Delimiters">
 					<Item id="24101" name="Operators style"/>
 					<Item id="24113" name="Styler"/>
 					<Item id="24116" name="Operators 1"/>

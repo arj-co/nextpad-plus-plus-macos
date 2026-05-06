@@ -1,6 +1,7 @@
 #import "ShortcutMapperWindowController.h"
 #import "AppDelegate.h"
 #import "MainWindowController.h"
+#import "MenuBuilder.h"          // kMenuTagPlugins
 #import "NppPluginManager.h"
 #import "NppLocalizer.h"
 
@@ -527,46 +528,47 @@ NSNotificationName const NPPShortcutsChangedNotification = @"NPPShortcutsChanged
 
 - (void)_loadPluginEntries {
     _pluginEntries = [NSMutableArray array];
-    // Walk the Plugins menu to extract plugin commands
-    NSMenu *mainMenu = [NSApp mainMenu];
-    for (NSMenuItem *topItem in mainMenu.itemArray) {
-        NSString *menuTitle = topItem.submenu.title ?: topItem.title;
-        if (![menuTitle isEqualToString:@"Plugins"]) continue;
-        [topItem.submenu update];
-        for (NSMenuItem *pluginItem in topItem.submenu.itemArray) {
-            if (pluginItem.isSeparatorItem) continue;
-            if (!pluginItem.submenu) continue;
-            NSString *plugName = pluginItem.title;
-            if (!plugName.length) continue;
-            [pluginItem.submenu update];
-            for (NSMenuItem *cmdItem in pluginItem.submenu.itemArray) {
-                if (cmdItem.isSeparatorItem || !cmdItem.action) continue;
-                if (!cmdItem.title.length) continue;
-                // Skip separator-like items (some plugins use "-" as menu item title)
-                // Skip separator-like items (plugins use "-" as title for separators)
-                NSString *trimmed = [cmdItem.title stringByTrimmingCharactersInSet:
-                    [NSCharacterSet characterSetWithCharactersInString:@"- "]];
-                if (trimmed.length == 0) continue;
-                ShortcutEntry *e = [[ShortcutEntry alloc] init];
-                e.name = cmdItem.title;
-                e.pluginName = plugName;
-                e.commandID = cmdItem.tag;
-                e.selectorName = NSStringFromSelector(cmdItem.action);
-                // Extract key
-                NSString *key = cmdItem.keyEquivalent;
-                NSEventModifierFlags mods = cmdItem.keyEquivalentModifierMask;
-                if (key.length > 0 && [key characterAtIndex:0] > 32) {
-                    e.hasCmd   = (mods & NSEventModifierFlagCommand) != 0;
-                    e.hasCtrl  = (mods & NSEventModifierFlagControl) != 0;
-                    e.hasAlt   = (mods & NSEventModifierFlagOption)  != 0;
-                    e.hasShift = (mods & NSEventModifierFlagShift)   != 0;
-                    e.keyCode  = [key.uppercaseString characterAtIndex:0];
-                }
-                [e updateDisplay];
-                [_pluginEntries addObject:e];
+    // Walk the Plugins menu to extract plugin commands. Use the tag-based
+    // lookup so this works regardless of UI language — a literal-title
+    // scan would fall through and the Shortcut Mapper's Plugins tab would
+    // be empty in any non-English locale.
+    NSMenu *pluginsMenu = [[[NSApp mainMenu] itemWithTag:kMenuTagPlugins] submenu];
+    if (!pluginsMenu) {
+        NSLog(@"[ShortcutMapper] Plugins menu not found (tag missing)");
+        return;
+    }
+    [pluginsMenu update];
+    for (NSMenuItem *pluginItem in pluginsMenu.itemArray) {
+        if (pluginItem.isSeparatorItem) continue;
+        if (!pluginItem.submenu) continue;
+        NSString *plugName = pluginItem.title;
+        if (!plugName.length) continue;
+        [pluginItem.submenu update];
+        for (NSMenuItem *cmdItem in pluginItem.submenu.itemArray) {
+            if (cmdItem.isSeparatorItem || !cmdItem.action) continue;
+            if (!cmdItem.title.length) continue;
+            // Skip separator-like items (plugins use "-" as title for separators)
+            NSString *trimmed = [cmdItem.title stringByTrimmingCharactersInSet:
+                [NSCharacterSet characterSetWithCharactersInString:@"- "]];
+            if (trimmed.length == 0) continue;
+            ShortcutEntry *e = [[ShortcutEntry alloc] init];
+            e.name = cmdItem.title;
+            e.pluginName = plugName;
+            e.commandID = cmdItem.tag;
+            e.selectorName = NSStringFromSelector(cmdItem.action);
+            // Extract key
+            NSString *key = cmdItem.keyEquivalent;
+            NSEventModifierFlags mods = cmdItem.keyEquivalentModifierMask;
+            if (key.length > 0 && [key characterAtIndex:0] > 32) {
+                e.hasCmd   = (mods & NSEventModifierFlagCommand) != 0;
+                e.hasCtrl  = (mods & NSEventModifierFlagControl) != 0;
+                e.hasAlt   = (mods & NSEventModifierFlagOption)  != 0;
+                e.hasShift = (mods & NSEventModifierFlagShift)   != 0;
+                e.keyCode  = [key.uppercaseString characterAtIndex:0];
             }
+            [e updateDisplay];
+            [_pluginEntries addObject:e];
         }
-        break;
     }
     NSLog(@"[ShortcutMapper] Plugin commands: %lu entries", (unsigned long)_pluginEntries.count);
 }
