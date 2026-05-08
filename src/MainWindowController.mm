@@ -2856,26 +2856,7 @@ static BOOL groupHasTrailingSep(NSString *ident) {
         if (lang.length) [ed setLanguage:lang];
         [_tabManager refreshCurrentTabTitle];
 
-        // ── Restore cursor, selection, scroll state ──
         ScintillaView *sci = ed.scintillaView;
-        NSNumber *startPos = info[@"startPos"];
-        NSNumber *endPos   = info[@"endPos"];
-        if (startPos && endPos) {
-            NSInteger selMode = [info[@"selMode"] integerValue];
-            if (selMode > 0)
-                [sci message:SCI_SETSELECTIONMODE wParam:(uptr_t)selMode];
-            [sci message:SCI_SETANCHOR     wParam:0 lParam:startPos.longLongValue];
-            [sci message:SCI_SETCURRENTPOS wParam:0 lParam:endPos.longLongValue];
-        }
-        NSNumber *scrollWidth = info[@"scrollWidth"];
-        if (scrollWidth && scrollWidth.longLongValue > 1)
-            [sci message:SCI_SETSCROLLWIDTH wParam:(uptr_t)scrollWidth.longLongValue];
-        NSNumber *xOffset = info[@"xOffset"];
-        if (xOffset)
-            [sci message:SCI_SETXOFFSET wParam:(uptr_t)xOffset.longLongValue];
-        NSNumber *firstVisLine = info[@"firstVisibleLine"];
-        if (firstVisLine)
-            [sci message:SCI_SETFIRSTVISIBLELINE wParam:(uptr_t)firstVisLine.longLongValue];
 
         // ── Restore encoding ──
         // (encoding is set during loadFileAtPath: based on BOM detection;
@@ -2900,7 +2881,9 @@ static BOOL groupHasTrailingSep(NSString *ident) {
         for (NSNumber *bkLine in bookmarks)
             [sci message:SCI_MARKERADD wParam:(uptr_t)bkLine.longLongValue lParam:20]; // kBookmarkMarker=20
 
-        // ── Restore fold state ──
+        // ── Restore fold state (BEFORE caret so a saved caret on a header
+        // line lands consistently with the display, and any later
+        // ENSUREVISIBLE call has the right fold context to expand). ──
         NSArray *folds = info[@"folds"];
         if (folds.count) {
             // Ensure fold levels are computed before applying fold state
@@ -2913,6 +2896,41 @@ static BOOL groupHasTrailingSep(NSString *ident) {
                     [sci message:SCI_TOGGLEFOLD wParam:(uptr_t)line];
             }
         }
+
+        // ── Restore cursor & selection ──
+        // SCI_SETSEL takes wParam=anchor, lParam=caret, atomically. Earlier
+        // code mistakenly used SCI_SETANCHOR/SCI_SETCURRENTPOS with the
+        // position in lParam (those take wParam=pos), so the saved offset
+        // never actually applied — every relaunch parked the caret at 0.
+        // Clamp against current document length in case the file shrank
+        // since the session was saved.
+        NSNumber *startPos = info[@"startPos"];
+        NSNumber *endPos   = info[@"endPos"];
+        if (startPos && endPos) {
+            sptr_t docLen = [sci message:SCI_GETLENGTH];
+            sptr_t anchor = MAX((sptr_t)0, MIN((sptr_t)startPos.longLongValue, docLen));
+            sptr_t caret  = MAX((sptr_t)0, MIN((sptr_t)endPos.longLongValue,   docLen));
+            NSInteger selMode = [info[@"selMode"] integerValue];
+            if (selMode > 0)
+                [sci message:SCI_SETSELECTIONMODE wParam:(uptr_t)selMode];
+            [sci message:SCI_SETSEL wParam:(uptr_t)anchor lParam:(sptr_t)caret];
+            // If the caret line sits inside a still-collapsed fold,
+            // expand the enclosing folds so the caret is reachable.
+            sptr_t caretLine = [sci message:SCI_LINEFROMPOSITION wParam:(uptr_t)caret];
+            [sci message:SCI_ENSUREVISIBLEENFORCEPOLICY wParam:(uptr_t)caretLine];
+        }
+
+        // ── Restore scroll position (last, so saved firstVisibleLine wins
+        // over the implicit scroll caused by ENSUREVISIBLE above). ──
+        NSNumber *scrollWidth = info[@"scrollWidth"];
+        if (scrollWidth && scrollWidth.longLongValue > 1)
+            [sci message:SCI_SETSCROLLWIDTH wParam:(uptr_t)scrollWidth.longLongValue];
+        NSNumber *xOffset = info[@"xOffset"];
+        if (xOffset)
+            [sci message:SCI_SETXOFFSET wParam:(uptr_t)xOffset.longLongValue];
+        NSNumber *firstVisLine = info[@"firstVisibleLine"];
+        if (firstVisLine)
+            [sci message:SCI_SETFIRSTVISIBLELINE wParam:(uptr_t)firstVisLine.longLongValue];
 
         opened++;
     }
