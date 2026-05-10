@@ -1424,6 +1424,13 @@ static NSDictionary<NSString *, NSArray *> *toolbarGroupMap(void) {
     NSTextField      *_gitBranchLabel;
     NSLayoutConstraint *_findPanelHeightConstraint;
     NSTimer          *_autoSaveTimer;
+    /// YES once restoreLastSession has successfully opened ≥1 tab from the
+    /// stored session this launch. Used by saveSession to decide whether the
+    /// "preserve when empty" guard applies — see saveSession's Issue #87
+    /// comment for details. (Bug fix: closing all restored tabs and quitting
+    /// would otherwise leave the prior session.plist untouched, so the same
+    /// tabs reappeared on next launch.)
+    BOOL              _didRestoreSession;
 
     // Side panel host
     NSSplitView       *_editorSplitView;
@@ -2825,14 +2832,18 @@ static BOOL groupHasTrailingSep(NSString *ident) {
         [tabs addObject:info];
     }
 
-    // Issue #87 — don't overwrite session.plist with an empty session.
-    // The loop above skips unmodified untitled tabs, so a window that only
-    // holds the default empty buffer produces tabs.count == 0. Writing that
-    // would destructively erase any previously-saved session — which manifests
-    // when the user toggles "Remember session" OFF, quits (save skipped, file
-    // preserved), relaunches (1 default tab), toggles back ON, then quits:
-    // without this guard the toggle-on quit would wipe the preserved session.
-    if (tabs.count == 0) return;
+    // Issue #87 (refined) — empty-session preserve guard.
+    // Original case: user toggles "Remember session" OFF, quits (save skipped),
+    // relaunches (1 default empty tab), toggles back ON, quits. Without a guard
+    // the empty-on-quit would wipe the prior session.plist.
+    // Refinement: if THIS launch actually restored a session, an empty
+    // tabs array at quit means the user explicitly closed everything they
+    // had open — they want the session cleared, not preserved.
+    //   _didRestoreSession    | tabs.count == 0 ? action
+    //   ──────────────────────┼──────────────────────────
+    //   YES (restored at boot)| write empty session  → user's close persists
+    //   NO  (didn't restore)  | preserve prior plist → original Issue #87 fix
+    if (tabs.count == 0 && !_didRestoreSession) return;
 
     NSDictionary *session = @{
         @"tabs":          tabs,
@@ -2976,6 +2987,13 @@ static BOOL groupHasTrailingSep(NSString *ident) {
     NSInteger sel = [session[@"selectedIndex"] integerValue];
     if (sel < (NSInteger)_tabManager.allEditors.count)
         [_tabManager selectTabAtIndex:sel];
+
+    // Mark this launch as session-restored. saveSession uses this to allow
+    // writing an empty session.plist if the user explicitly closed all the
+    // restored tabs before quitting (otherwise the empty-guard would keep
+    // the stale session.plist around and the same tabs would reappear next
+    // launch).
+    _didRestoreSession = YES;
     return YES;
 }
 
