@@ -1963,6 +1963,32 @@ static int vkToScintillaKey(int vk) {
 
 #pragma mark - Preferences
 
+/// Resize the line-number margin (margin 0) to fit the current line count
+/// at the current zoom level. No-op when line numbers are hidden or when
+/// kPrefLineNumDynWidth is OFF (in that case the fixed 44 px set by
+/// applyPreferencesFromDefaults remains in effect). Called from:
+///   • applyPreferencesFromDefaults  (theme / pref change, font change)
+///   • SCN_ZOOM                      (every zoom step — Scintilla raises
+///     this after the new zoom is committed, so SCI_TEXTWIDTH returns
+///     post-zoom pixels)
+/// SCI_TEXTWIDTH measures a ~10-char string (~µs) and SCI_SETMARGINWIDTHN
+/// short-circuits on unchanged width, so the helper is cheap to call on
+/// every zoom step even for very large files.
+- (void)recomputeLineNumberMargin {
+    ScintillaView *sci = _scintillaView;
+    if (!sci) return;
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    if (![ud boolForKey:kPrefShowLineNumbers]) return;
+    if (![ud boolForKey:kPrefLineNumDynWidth]) return;
+
+    sptr_t lineCount = [sci message:SCI_GETLINECOUNT];
+    NSString *measure = [NSString stringWithFormat:@"_%ld", (long)lineCount];
+    sptr_t width = [sci message:SCI_TEXTWIDTH wParam:STYLE_LINENUMBER
+                          lParam:(sptr_t)measure.UTF8String];
+    if (width < 30) width = 30;
+    [sci message:SCI_SETMARGINWIDTHN wParam:0 lParam:width];
+}
+
 - (void)applyPreferencesFromDefaults {
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     ScintillaView *sci = _scintillaView;
@@ -2077,17 +2103,8 @@ static int vkToScintillaKey(int vk) {
     [sci message:SCI_SETMARGINRIGHT wParam:0 lParam:[ud integerForKey:kPrefPaddingRight]];
 
     // ── Line number dynamic width ──
-    if ([ud boolForKey:kPrefShowLineNumbers]) {
-        if ([ud boolForKey:kPrefLineNumDynWidth]) {
-            sptr_t lineCount = [sci message:SCI_GETLINECOUNT];
-            NSString *measure = [NSString stringWithFormat:@"_%ld", (long)lineCount];
-            sptr_t width = [sci message:SCI_TEXTWIDTH wParam:STYLE_LINENUMBER
-                                  lParam:(sptr_t)measure.UTF8String];
-            if (width < 30) width = 30;
-            [sci message:SCI_SETMARGINWIDTHN wParam:0 lParam:width];
-        }
-        // else: fixed 44px already set above
-    }
+    // Falls back to the fixed 44 px just set above when dyn-width is OFF.
+    [self recomputeLineNumberMargin];
 
     // ── Fold margin style ──
     {
@@ -3780,6 +3797,13 @@ static NSSet<NSString *> *_cLikeLanguages() {
             break;
         case SCN_DOUBLECLICK:
             [self _handleDelimiterDoubleClick:notification];
+            break;
+        case SCN_ZOOM:
+            // Re-fit the line-number margin to the new zoom level so digits
+            // don't get clipped at higher zoom. Scintilla raises SCN_ZOOM
+            // from inside SCI_SETZOOM / SCI_ZOOMIN / SCI_ZOOMOUT, covering
+            // every zoom path (menu, Ctrl+scroll, plugin SCI_SETZOOM).
+            [self recomputeLineNumberMargin];
             break;
         default:
             break;
