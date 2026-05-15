@@ -99,10 +99,9 @@ static FindWindow *_sharedInstance = nil;
 - (instancetype)init {
     NSWindow *win = [[NSWindow alloc]
         initWithContentRect:NSMakeRect(0, 0, kWinW, 355)
-                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable)
+                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
                     backing:NSBackingStoreBuffered defer:NO];
     win.title = [[NppLocalizer shared] translate:@"Find"];
-    win.minSize = NSMakeSize(540, 300);
     [win center];
 
     self = [super initWithWindow:win];
