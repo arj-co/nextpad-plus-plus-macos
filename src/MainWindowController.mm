@@ -6666,7 +6666,14 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
 
 /// Apply context menu to ALL editors in all tab managers.
 - (void)applyEditorContextMenuToAll {
-    if (!_editorContextMenu) [self _buildEditorContextMenu];
+    // Issue #144 — force a fresh rebuild. This is invoked right after plugins
+    // finish loading (see AppDelegate), but the menu was first built lazily
+    // during early window setup — before any plugin submenus existed in the
+    // Plugins menu. That stale cache contained only built-in submenus (e.g.
+    // MIME Tools) and silently dropped every external plugin command. Discard
+    // and rebuild now so plugin submenus are resolvable.
+    _editorContextMenu = nil;
+    [self _buildEditorContextMenu];
     for (TabManager *tm in @[_tabManager, _subTabManagerH, _subTabManagerV]) {
         if (!tm) continue;
         for (EditorView *ed in [tm allEditors]) {
