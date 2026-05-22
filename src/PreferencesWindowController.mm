@@ -42,6 +42,9 @@ NSString *const kPrefCopyLineNoSelection = @"copyLineNoSelection";
 NSString *const kPrefSmartHighlight      = @"smartHighlight";
 NSString *const kPrefFillFindWithSelection = @"fillFindWithSelection";
 NSString *const kPrefFuncParamsHint      = @"funcParamsHint";
+NSString *const kPrefFindTransparencyEnabled = @"findTransparencyEnabled";
+NSString *const kPrefFindTransparencyMode    = @"findTransparencyMode";   // 0=losing focus, 1=always
+NSString *const kPrefFindTransparencyAlpha   = @"findTransparencyAlpha";
 NSString *const kPrefShowStatusBar       = @"showStatusBar";
 NSString *const kPrefMuteSounds          = @"muteSounds";
 NSString *const kPrefSaveAllConfirm      = @"saveAllConfirm";
@@ -175,6 +178,9 @@ NSString *const kPrefStyleFontSize      = @"styleFontSize";
         kPrefSmartHighlight:       @YES,
         kPrefFillFindWithSelection:@YES,
         kPrefFuncParamsHint:       @NO,
+        kPrefFindTransparencyEnabled: @YES,  // matches Windows default
+        kPrefFindTransparencyMode:    @0,    // 0=on losing focus, 1=always
+        kPrefFindTransparencyAlpha:   @0.5,
         kPrefShowStatusBar:        @YES,
         kPrefMuteSounds:           @NO,
         kPrefSaveAllConfirm:       @NO,

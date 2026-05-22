@@ -51,6 +51,11 @@ extern NSString *const kPrefCopyLineNoSelection; // BOOL, default YES
 extern NSString *const kPrefSmartHighlight;      // BOOL, default YES
 extern NSString *const kPrefFillFindWithSelection;// BOOL, default YES
 extern NSString *const kPrefFuncParamsHint;      // BOOL, default NO
+// Find window transparency (issue #143 — Windows "Transparency" parity).
+// The control lives in the Find/Replace tabs of FindWindow, not this prefs pane.
+extern NSString *const kPrefFindTransparencyEnabled; // BOOL, default YES
+extern NSString *const kPrefFindTransparencyMode;    // NSInteger 0=on losing focus, 1=always
+extern NSString *const kPrefFindTransparencyAlpha;   // double 0.2–0.9, default 0.5
 // Tier 1 booleans
 extern NSString *const kPrefShowStatusBar;       // BOOL, default YES
 extern NSString *const kPrefMuteSounds;          // BOOL, default NO
