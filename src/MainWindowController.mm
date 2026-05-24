@@ -153,15 +153,27 @@ static NSMenu *_buildEditorContextMenuFromXML(NSString *xmlPath) {
     NSMenu *contextMenu = [[NSMenu alloc] initWithTitle:@""];
     NSMutableDictionary<NSString *, NSMenu *> *folders = [NSMutableDictionary dictionary];
 
+    // The on-disk XML stays in English (so users edit a stable file). Each
+    // lookup key and visible label is run through NppLocalizer here so the
+    // matching against the (already-translated) main menu succeeds, and so
+    // FolderName / ItemNameAs strings display in the active language.
+    // -translate: returns its input unchanged when not in the dictionary —
+    // safe to apply blindly (plugin names, macro names, custom user labels
+    // come back as-is).
+    NppLocalizer *loc = [NppLocalizer shared];
+    NSString *(^xlate)(NSString *) = ^NSString *(NSString *s) {
+        return s.length ? [loc translate:s] : s;
+    };
+
     for (NSXMLElement *el in items) {
-        NSString *folderName  = [[el attributeForName:@"FolderName"] stringValue];
-        NSString *menuEntry   = [[el attributeForName:@"MenuEntryName"] stringValue];
-        NSString *menuItem    = [[el attributeForName:@"MenuItemName"] stringValue];
-        NSString *subMenuName = [[el attributeForName:@"MenuSubMenuName"] stringValue];
-        NSString *displayAs   = [[el attributeForName:@"ItemNameAs"] stringValue];
-        NSString *pluginEntry = [[el attributeForName:@"PluginEntryName"] stringValue];
-        NSString *pluginCmd   = [[el attributeForName:@"PluginCommandItemName"] stringValue];
-        NSString *macroEntry  = [[el attributeForName:@"MacroEntryName"] stringValue];
+        NSString *folderName  = xlate([[el attributeForName:@"FolderName"] stringValue]);
+        NSString *menuEntry   = xlate([[el attributeForName:@"MenuEntryName"] stringValue]);
+        NSString *menuItem    = xlate([[el attributeForName:@"MenuItemName"] stringValue]);
+        NSString *subMenuName = xlate([[el attributeForName:@"MenuSubMenuName"] stringValue]);
+        NSString *displayAs   = xlate([[el attributeForName:@"ItemNameAs"] stringValue]);
+        NSString *pluginEntry = xlate([[el attributeForName:@"PluginEntryName"] stringValue]);
+        NSString *pluginCmd   = xlate([[el attributeForName:@"PluginCommandItemName"] stringValue]);
+        NSString *macroEntry  = xlate([[el attributeForName:@"MacroEntryName"] stringValue]);
         NSInteger itemId      = [[[el attributeForName:@"id"] stringValue] integerValue];
 
         // Separator
@@ -2914,6 +2926,16 @@ static BOOL groupHasTrailingSep(NSString *ident) {
     // subscriber for the title.
     [[NSNotificationCenter defaultCenter]
         addObserver:self selector:@selector(_refreshOpenPanelTitles)
+               name:NPPLocalizationChanged object:nil];
+    // Editor right-click context menu — built once from contextMenu.xml using
+    // string-keyed lookups against the (already translated) main menu, then
+    // cached on _editorContextMenu. A language switch retranslates the main
+    // menu but leaves the cached context menu's by-value title copies stale,
+    // so it stays in English forever. Rebuild from XML on every language
+    // change; -applyEditorContextMenuToAll: discards the cache and re-pushes
+    // the fresh menu to every open Scintilla view.
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self selector:@selector(applyEditorContextMenuToAll)
                name:NPPLocalizationChanged object:nil];
     // Universal-in-session word wrap. Cross-window broadcast: when ANY
     // MainWindowController toggles wrap, every other one observes here
