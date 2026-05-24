@@ -3708,6 +3708,12 @@ static void removeMacroFromShortcutsXML(NSString *name) {
     [[self currentEditor] runMacro];
 }
 
+// No-op target for the two radio buttons inside the "Run a Macro Multiple
+// Times" dialog. AppKit auto-groups sibling radio buttons that share the
+// same (non-nil) target+action selector — without an actual selector to
+// share, the mutual-exclusion behavior never engages.
+- (void)_macroDialogRadioClicked:(id)sender { (void)sender; }
+
 - (void)runMacroMultipleTimes:(id)sender {
     EditorView *ed = [self currentEditor];
     if (!ed) return;
@@ -3748,8 +3754,13 @@ static void removeMacroFromShortcutsXML(NSString *name) {
     }
     [cv addSubview:macroPopup];
 
-    // "Run N times" radio + text field
-    NSButton *radioN = [NSButton radioButtonWithTitle:[[NppLocalizer shared] translate:@"Run"] target:nil action:nil];
+    // "Run N times" / "Run until end of file" radios.
+    // AppKit auto-groups sibling radio buttons that share BOTH target and
+    // action — clicking one then turns the other off automatically. The
+    // earlier hand-rolled wiring nulled both out, so the group degenerated
+    // into two independent toggles.
+    NSButton *radioN = [NSButton radioButtonWithTitle:[[NppLocalizer shared] translate:@"Run"]
+                                               target:self action:@selector(_macroDialogRadioClicked:)];
     radioN.frame = NSMakeRect(20, 85, 60, 20);
     radioN.state = NSControlStateValueOn;
     [cv addSubview:radioN];
@@ -3762,19 +3773,11 @@ static void removeMacroFromShortcutsXML(NSString *name) {
     timesLabel.frame = NSMakeRect(140, 87, 40, 16);
     [cv addSubview:timesLabel];
 
-    // "Run until end of file" radio
-    NSButton *radioEOF = [NSButton radioButtonWithTitle:[[NppLocalizer shared] translate:@"Run until the end of file"] target:nil action:nil];
+    NSButton *radioEOF = [NSButton radioButtonWithTitle:[[NppLocalizer shared] translate:@"Run until the end of file"]
+                                                 target:self action:@selector(_macroDialogRadioClicked:)];
     radioEOF.frame = NSMakeRect(20, 58, 250, 20);
     radioEOF.state = NSControlStateValueOff;
     [cv addSubview:radioEOF];
-
-    // Link radio buttons
-    radioN.target = radioEOF; radioN.action = @selector(setState:);
-    radioEOF.target = radioN; radioEOF.action = @selector(setState:);
-    // Manual radio group behavior
-    __block NSButton *selectedRadio = radioN;
-    radioN.action = nil; radioEOF.action = nil;
-    radioN.target = nil; radioEOF.target = nil;
 
     // Run / Cancel buttons
     NSButton *btnRun = [[NSButton alloc] initWithFrame:NSMakeRect(130, 12, 85, 28)];
@@ -3812,23 +3815,88 @@ static void removeMacroFromShortcutsXML(NSString *name) {
 
     // Run N times or until EOF
     BOOL runUntilEOF = (radioEOF.state == NSControlStateValueOn);
+
+    // Esc-to-cancel — drain at most one KeyDown event per iteration. Pumping
+    // the full run loop would also deliver mouse events to the editor and
+    // fight the macro's own actions, so we filter to KeyDown only via
+    // -nextEventMatchingMask:untilDate:inMode:dequeue: with distantPast.
+    __block BOOL cancelled = NO;
+    BOOL (^checkCancel)(void) = ^BOOL {
+        NSEvent *evt = [NSApp nextEventMatchingMask:NSEventMaskKeyDown
+                                          untilDate:[NSDate distantPast]
+                                             inMode:NSDefaultRunLoopMode
+                                            dequeue:YES];
+        if (evt && evt.keyCode == 53) {  // Esc
+            cancelled = YES;
+            return YES;
+        }
+        return NO;
+    };
+
+    ScintillaView *sci = ed.scintillaView;
+
     if (runUntilEOF) {
-        // Run until cursor stops advancing or goes past EOF
-        for (NSInteger iter = 0; iter < 100000; iter++) {
-            sptr_t posBefore = [ed.scintillaView message:SCI_GETCURRENTPOS];
-            sptr_t lastLine  = [ed.scintillaView message:SCI_GETLINECOUNT] - 1;
-            sptr_t curLine   = [ed.scintillaView message:SCI_LINEFROMPOSITION wParam:(uptr_t)posBefore];
+        // Faithful port of Windows NppBigSwitch.cpp:1487-1556 — line-delta
+        // termination. The macro keeps running while it makes *line-level*
+        // forward (or, with a shrinking file, backward) progress. Random-
+        // Values-style "insert at cursor without a newline" macros terminate
+        // after one iteration because deltaCurrLine==0 && deltaLastLine>=0.
+        //
+        // "lastLine" tracks the ORIGINAL last line at loop entry, and is
+        // only advanced when the file is shrinking faster than the cursor
+        // is moving — so a growing file does NOT extend its own runway.
+        sptr_t lastLine = [sci message:SCI_GETLINECOUNT] - 1;
+        sptr_t currPos  = [sci message:SCI_GETCURRENTPOS];
+        sptr_t currLine = [sci message:SCI_LINEFROMPOSITION wParam:(uptr_t)currPos];
+        sptr_t deltaLastLine = 0;
+        sptr_t deltaCurrLine = 0;
+        BOOL cursorMovedUp = NO;
+        NSInteger counter = 0;
+        // Hard cap — the algorithm above should terminate naturally, but a
+        // pathological recorded macro shouldn't be able to freeze the app.
+        NSInteger const kHardCap = 100000;
+        while (counter < kHardCap) {
             [ed runMacroActions:actionsToRun];
-            sptr_t posAfter = [ed.scintillaView message:SCI_GETCURRENTPOS];
-            sptr_t curLineAfter = [ed.scintillaView message:SCI_LINEFROMPOSITION wParam:(uptr_t)posAfter];
-            if (posAfter == posBefore) break;        // no progress
-            if (curLineAfter > lastLine) break;      // past EOF
-            if (curLineAfter < curLine) break;        // moved backwards
+            counter++;
+
+            // Direction-flip guard (Windows: counter > 2). The cursor's
+            // line index must be monotonically advancing in one direction,
+            // unless the file is shrinking. Otherwise we can't prove the
+            // loop terminates.
+            if (counter > 2 && cursorMovedUp != (deltaCurrLine < 0) && deltaLastLine >= 0)
+                break;
+
+            cursorMovedUp = (deltaCurrLine < 0);
+            sptr_t newLast = [sci message:SCI_GETLINECOUNT] - 1;
+            sptr_t newPos  = [sci message:SCI_GETCURRENTPOS];
+            sptr_t newLine = [sci message:SCI_LINEFROMPOSITION wParam:(uptr_t)newPos];
+            deltaLastLine = newLast - lastLine;
+            deltaCurrLine = newLine - currLine;
+
+            // No line-level progress AND no lines removed → done.
+            if (deltaCurrLine == 0 && deltaLastLine >= 0)
+                break;
+
+            // Only track lastLine when the file is shrinking faster than
+            // the cursor is advancing — keeps the EOF goalpost honest.
+            if (deltaLastLine < deltaCurrLine)
+                lastLine += deltaLastLine;
+            currLine += deltaCurrLine;
+
+            // EOF / BOF / wedged-at-zero special case.
+            if (currLine > lastLine || currLine < 0 ||
+                (deltaCurrLine == 0 && currLine == 0 &&
+                 (deltaLastLine >= 0 || cursorMovedUp)))
+                break;
+
+            if (checkCancel()) break;
         }
     } else {
         NSInteger times = MAX(1, timesField.integerValue);
-        for (NSInteger i = 0; i < times; i++)
+        for (NSInteger i = 0; i < times; i++) {
             [ed runMacroActions:actionsToRun];
+            if (checkCancel()) break;
+        }
     }
 }
 
