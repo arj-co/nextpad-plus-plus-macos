@@ -7,6 +7,7 @@
 #import "ScintillaView.h"
 
 #include <dlfcn.h>
+#include <malloc/malloc.h>
 #include <string>
 #include <vector>
 #include <memory>
@@ -1441,9 +1442,22 @@ static intptr_t _npp_run_on_main(intptr_t (^block)(void)) {
         }
 
         // ── macOS-specific: plugin panel docking ──────────────────────
-        case NPPM_DMM_REGISTERPANEL:
-            return (intptr_t)[self registerPluginPanel:(__bridge NSView *)(void *)wParam
+        case NPPM_DMM_REGISTERPANEL: {
+            // Plugin hands in an NSView for host retention. We MUST NOT pass
+            // raw wParam to an ObjC method without validation — the ARC retain
+            // inserted at the call boundary (registerPluginPanel: takes a
+            // __strong NSView*) dereferences the pointer inside objc_retain.
+            // A garbage value like 0xDEADBEEF segfaults the host before our
+            // method body runs. There's no master list to validate against
+            // here (unlike the bufferID handlers), so use malloc_zone_from_ptr
+            // as a cheap "is this a live heap allocation" guard — NSView
+            // instances are always malloc-allocated; garbage or stale 32-bit
+            // sentinels are not. Reject anything that's clearly not.
+            void *target = (void *)wParam;
+            if (!target || !malloc_zone_from_ptr(target)) return 0;
+            return (intptr_t)[self registerPluginPanel:(__bridge NSView *)target
                                                  title:(const char *)lParam];
+        }
         case NPPM_DMM_SHOWPANEL:
             return [self showPluginPanelWithHandle:(uint64_t)wParam];
         case NPPM_DMM_HIDEPANEL:
