@@ -990,6 +990,10 @@ static NSString *const kTBPluginGroupPrefix = @"TB_PluginGrp:";
 // and tahoeToolbarGroups(). Built only when the effective profile is Tahoe.
 static NSString *const kTBTahoeGroupPrefix = @"TB_TGroup:";
 
+// Tahoe profile: the single "Plugins" capsule — a few plugin icons + a label ▾
+// exposing the rest. Built/refreshed dynamically as plugins register their icons.
+static NSString *const kTBTahoePluginsGroup = @"TB_TPlugins";
+
 // ── Toolbar metric helpers ──────────────────────────────────────────────────
 // Single source of truth for toolbar button + icon dimensions and gaps. All
 // values derive from kPrefToolbarIconScale (50/75/90/100/125/150 %), with
@@ -1506,6 +1510,7 @@ static NSImage *_customToolbarIcon(NSString *buttonId, NSDictionary *toolbarConf
 // clicking it pops a menu of those items. Custom-drawn (Tahoe profile only) — this
 // is what NSToolbarItemGroup can't do (it renders a separate ellipsis button and
 // can't make the label a dropdown). Used via -makeTahoeGroupToolbarItem:.
+static const CGFloat kTGOuterX   = 9.0;   // outer margin each side → gap BETWEEN capsules
 static const CGFloat kTGPadX     = 7.0;   // capsule inset L/R
 static const CGFloat kTGPadTop   = 5.0;   // capsule inset top
 static const CGFloat kTGPadBot   = 4.0;   // capsule inset bottom
@@ -1528,15 +1533,16 @@ static const CGFloat kTGLabelH   = 13.0;  // label row height
                           label:(NSString *)label
                    overflowMenu:(nullable NSMenu *)menu {
     NSUInteger n = buttons.count;
-    CGFloat rowW = n * kTGBtn + (n > 0 ? (n - 1) * kTGBtnGap : 0);
-    CGFloat w = kTGPadX * 2 + rowW;
+    CGFloat rowW     = n * kTGBtn + (n > 0 ? (n - 1) * kTGBtnGap : 0);
+    CGFloat capsuleW = kTGPadX * 2 + rowW;
+    CGFloat w = capsuleW + kTGOuterX * 2;   // outer margin separates adjacent capsules
     CGFloat h = kTGPadTop + kTGBtn + kTGLabelGap + kTGLabelH + kTGPadBot;
     self = [super initWithFrame:NSMakeRect(0, 0, w, h)];
     if (!self) return nil;
     self.wantsLayer = YES;
     _overflowMenu = menu;
 
-    CGFloat x = kTGPadX;
+    CGFloat x = kTGOuterX + kTGPadX;
     CGFloat btnY = h - kTGPadTop - kTGBtn;
     for (NSButton *b in buttons) {
         b.frame = NSMakeRect(x, btnY, kTGBtn, kTGBtn);
@@ -1544,19 +1550,30 @@ static const CGFloat kTGLabelH   = 13.0;  // label row height
         x += kTGBtn + kTGBtnGap;
     }
 
-    _labelButton = [[NSButton alloc] initWithFrame:NSMakeRect(0, kTGPadBot, w, kTGLabelH)];
+    // Group label centered within the capsule. With overflow, append a ⌄ raised
+    // a few px and snug to the label (its own attribute run, minimal leading gap).
+    _labelButton = [[NSButton alloc] initWithFrame:NSMakeRect(kTGOuterX, kTGPadBot, capsuleW, kTGLabelH)];
     _labelButton.bordered = NO;
     [_labelButton setButtonType:NSButtonTypeMomentaryChange];
-    NSString *title = menu ? [label stringByAppendingString:@"  ⌄"] : label;
     NSMutableParagraphStyle *ps = [NSMutableParagraphStyle new];
     ps.alignment = NSTextAlignmentCenter;
-    _labelButton.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{
+    NSMutableAttributedString *att = [[NSMutableAttributedString alloc] initWithString:label attributes:@{
         NSFontAttributeName:            [NSFont systemFontOfSize:10],
         NSForegroundColorAttributeName: [NSColor secondaryLabelColor],
         NSParagraphStyleAttributeName:  ps,
     }];
-    if (menu) { _labelButton.target = self; _labelButton.action = @selector(_popOverflow:); }
-    // No overflow → leave target nil; clicks are a harmless no-op, label stays full-opacity.
+    if (menu) {
+        [att appendAttributedString:[[NSAttributedString alloc] initWithString:@" ⌄" attributes:@{
+            NSFontAttributeName:            [NSFont systemFontOfSize:10],
+            NSForegroundColorAttributeName: [NSColor secondaryLabelColor],
+            NSParagraphStyleAttributeName:  ps,
+            NSBaselineOffsetAttributeName:  @3.0,   // raise the arrow ~3px
+        }]];
+        _labelButton.target = self;
+        _labelButton.action = @selector(_popOverflow:);
+    }
+    // No overflow → leave target nil; clicks are a harmless no-op.
+    _labelButton.attributedTitle = att;
     [self addSubview:_labelButton];
     return self;
 }
@@ -1570,8 +1587,9 @@ static const CGFloat kTGLabelH   = 13.0;  // label row height
     BOOL dark = [NppThemeManager shared].isDark;
     NSColor *fill = dark ? [NSColor colorWithWhite:1.0 alpha:0.07]
                          : [NSColor colorWithWhite:1.0 alpha:0.70];  // whitish capsule (mockup)
-    NSBezierPath *p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 0.5, 0.5)
-                                                      xRadius:6 yRadius:6];
+    // Inset by the outer margin so each capsule is separated from its neighbours.
+    NSRect cap = NSInsetRect(self.bounds, kTGOuterX, 0.5);
+    NSBezierPath *p = [NSBezierPath bezierPathWithRoundedRect:cap xRadius:6 yRadius:6];
     [fill setFill];
     [p fill];
 }
@@ -2099,7 +2117,10 @@ static NSArray<NSArray *> *tahoeToolbarGroups(void) {
     // USER-CONFIG mode keeps the legacy per-icon individual items (in that mode
     // plugins also appear inside the single kTBUserConfig item built at load).
     NSToolbar *tb = self.window.toolbar;
-    if ([_toolbarConfig[@"hasUserConfig"] boolValue]) {
+    if ([self _toolbarUsesTahoe]) {
+        // Tahoe: all plugins live in the single "Plugins" capsule — rebuild it.
+        [self _rebuildTahoePluginsGroup];
+    } else if ([_toolbarConfig[@"hasUserConfig"] boolValue]) {
         NSInteger insertIdx = tb.items.count;
         for (NSInteger i = 0; i < (NSInteger)tb.items.count; i++) {
             if ([tb.items[i].itemIdentifier isEqualToString:NSToolbarFlexibleSpaceItemIdentifier]) {
@@ -2461,13 +2482,15 @@ static NSToolbarItemIdentifier const kTBUserConfig = @"TB_UserConfig";
     return [self _classicDefaultItemIdentifiers:tb];
 }
 
-// Tahoe profile (Step 3c, first slice): one NSToolbarItemGroup per semantic
-// cluster (tahoeToolbarGroups()), then flexible space + the tab controls. Plugins
-// and user-config still fall back to the Classic builders for now.
+// Tahoe profile: one capsule group per semantic cluster (tahoeToolbarGroups()),
+// then the "Plugins" capsule (if any plugins have registered), flexible space, and
+// the tab controls.
 - (NSArray<NSToolbarItemIdentifier> *)_tahoeDefaultItemIdentifiers:(NSToolbar *)tb {
     NSMutableArray<NSToolbarItemIdentifier> *ids = [NSMutableArray array];
     for (NSArray *g in tahoeToolbarGroups())
         [ids addObject:[kTBTahoeGroupPrefix stringByAppendingString:g[0]]];
+    if (_pluginToolbarItems.count > 0)
+        [ids addObject:kTBTahoePluginsGroup];
     [ids addObject:NSToolbarFlexibleSpaceItemIdentifier];
     [ids addObject:kTBTabControls];
     return ids;
@@ -2507,12 +2530,13 @@ static NSToolbarItemIdentifier const kTBUserConfig = @"TB_UserConfig";
     return [self _classicToolbarItemForIdentifier:ident];
 }
 
-// Tahoe profile (Step 3c, first slice): build an NSToolbarItemGroup for each
-// semantic cluster; reuse the Classic tab-controls item; fall back to Classic for
-// anything else (plugins, user-config) for now.
+// Tahoe profile: build a capsule group for each semantic cluster + the Plugins
+// capsule; reuse the Classic tab-controls item; fall back to Classic otherwise.
 - (NSToolbarItem *)_tahoeToolbarItemForIdentifier:(NSToolbarItemIdentifier)ident {
     if ([ident isEqualToString:kTBTabControls])
         return [self makeTabControlsToolbarItem];
+    if ([ident isEqualToString:kTBTahoePluginsGroup])
+        return [self makeTahoePluginGroupToolbarItem:ident];
     if ([ident hasPrefix:kTBTahoeGroupPrefix]) {
         NSString *label = [ident substringFromIndex:kTBTahoeGroupPrefix.length];
         for (NSArray *g in tahoeToolbarGroups())
@@ -2585,6 +2609,76 @@ static NSToolbarItemIdentifier const kTBUserConfig = @"TB_UserConfig";
     item.minSize      = gv.frame.size;
     item.maxSize      = gv.frame.size;
     return item;
+}
+
+// The single Tahoe "Plugins" capsule: the first few registered plugin icons shown,
+// the rest behind the label's ▾. Plugin buttons fire pluginToolbarAction: via tag
+// (cmdID); icons come from the already-resolved pti[@"icon"] (colorization applied).
+- (NSToolbarItem *)makeTahoePluginGroupToolbarItem:(NSString *)groupIdent {
+    if (_pluginToolbarItems.count == 0) return nil;
+    const CGFloat iconSz   = [NppThemeManager shared].toolbarMetrics.iconSize;
+    const NSUInteger kPrim = 3;   // primary plugin icons shown in the capsule
+
+    NSMutableArray<NSButton *> *buttons = [NSMutableArray array];
+    NSMenu *menu = nil;
+    NSUInteger i = 0;
+    for (NSDictionary *pti in _pluginToolbarItems) {
+        int cmdID = [pti[@"cmdID"] intValue];
+        NSString *title = pti[@"tooltip"] ?: (pti[@"id"] ?: @"");
+        if (i < kPrim) {
+            NppToolbarButton *b = [[NppToolbarButton alloc]
+                initWithFrame:NSMakeRect(0, 0, kTGBtn, kTGBtn)];
+            NSImage *img = pti[@"icon"];
+            if (img) { img.size = NSMakeSize(iconSz, iconSz); b.image = img; }
+            b.toolTip = title;
+            b.tag     = cmdID;
+            b.target  = self;
+            b.action  = @selector(pluginToolbarAction:);
+            [buttons addObject:b];
+        } else {
+            if (!menu) menu = [[NSMenu alloc] initWithTitle:@"Plugins"];
+            NSMenuItem *mi = [[NSMenuItem alloc]
+                initWithTitle:title action:@selector(pluginToolbarAction:) keyEquivalent:@""];
+            mi.target = self;
+            mi.tag    = cmdID;
+            NSImage *mIcon = pti[@"icon"];
+            if (mIcon) {
+                NSImage *copy = [mIcon copy]; copy.size = NSMakeSize(16, 16); mi.image = copy;
+            }
+            [menu addItem:mi];
+        }
+        i++;
+    }
+    if (buttons.count == 0 && !menu) return nil;
+
+    NppTahoeGroupView *gv = [[NppTahoeGroupView alloc] initWithButtons:buttons
+                                                                label:@"Plugins"
+                                                         overflowMenu:menu];
+    NSToolbarItem *item = [[NSToolbarItem alloc] initWithItemIdentifier:groupIdent];
+    item.view         = gv;
+    item.label        = @"";
+    item.paletteLabel = @"Plugins";
+    item.minSize      = gv.frame.size;
+    item.maxSize      = gv.frame.size;
+    return item;
+}
+
+// Default(Tahoe) mode: rebuild the single Plugins capsule as plugins register
+// their icons dynamically. Removes the existing item (if any) and reinserts it
+// just before the flexible space.
+- (void)_rebuildTahoePluginsGroup {
+    NSToolbar *tb = self.window.toolbar;
+    if (!tb) return;
+    for (NSInteger i = (NSInteger)tb.items.count - 1; i >= 0; i--)
+        if ([tb.items[i].itemIdentifier isEqualToString:kTBTahoePluginsGroup])
+            [tb removeItemAtIndex:i];
+    if (_pluginToolbarItems.count == 0) return;
+    NSInteger insertIdx = tb.items.count;
+    for (NSInteger i = 0; i < (NSInteger)tb.items.count; i++)
+        if ([tb.items[i].itemIdentifier isEqualToString:NSToolbarFlexibleSpaceItemIdentifier]) {
+            insertIdx = i; break;
+        }
+    [tb insertItemWithItemIdentifier:kTBTahoePluginsGroup atIndex:insertIdx];
 }
 
 // Classic profile (current default): today's group / plugin item builders.
