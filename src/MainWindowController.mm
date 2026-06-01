@@ -5288,6 +5288,13 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
 
 - (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
     SEL action = item.action;
+    // Only NSMenuItem supports -setState: (checkmarks). NSToolbarItem — including
+    // the per-button subitems of the Tahoe NSToolbarItemGroups, which AppKit
+    // auto-validates through this same method — does NOT, and sending setState:
+    // to one aborts the app. Resolve to a menu item or nil so the state-setting
+    // calls below are a safe no-op for toolbar (and other non-menu) items.
+    NSMenuItem *mi = [(NSObject *)item isKindOfClass:[NSMenuItem class]]
+        ? (NSMenuItem *)item : nil;
     EditorView *ed = [self currentEditor];
     BOOL recording = ed && ed.isRecordingMacro;
 
@@ -5313,11 +5320,11 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
     // Scroll sync — disabled when no split view is active
     BOOL hasSplitView = (_subTabManagerV.allEditors.count > 0 || _subTabManagerH.allEditors.count > 0);
     if (action == @selector(toggleSyncVerticalScrolling:)) {
-        [(NSMenuItem *)item setState:_syncVerticalScrolling ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:_syncVerticalScrolling ? NSControlStateValueOn : NSControlStateValueOff];
         return hasSplitView;
     }
     if (action == @selector(toggleSyncHorizontalScrolling:)) {
-        [(NSMenuItem *)item setState:_syncHorizontalScrolling ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:_syncHorizontalScrolling ? NSControlStateValueOn : NSControlStateValueOff];
         return hasSplitView;
     }
 
@@ -5338,33 +5345,33 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
 
     // Always on Top checkmark
     if (action == @selector(toggleAlwaysOnTop:)) {
-        [(NSMenuItem *)item setState:(self.window.level == NSFloatingWindowLevel) ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:(self.window.level == NSFloatingWindowLevel) ? NSControlStateValueOn : NSControlStateValueOff];
         return YES;
     }
     // Post-It checkmark
     if (action == @selector(togglePostItMode:)) {
-        [(NSMenuItem *)item setState:_postItMode ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:_postItMode ? NSControlStateValueOn : NSControlStateValueOff];
         return YES;
     }
     // Distraction Free checkmark
     if (action == @selector(toggleDistractionFreeMode:)) {
-        [(NSMenuItem *)item setState:_distractionFreeMode ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:_distractionFreeMode ? NSControlStateValueOn : NSControlStateValueOff];
         return YES;
     }
     // Monitoring checkmark — only enabled for tabs with a real file
     if (action == @selector(toggleMonitoring:)) {
         BOOL hasFile = ed && ed.filePath.length > 0;
-        [(NSMenuItem *)item setState:(hasFile && ed.monitoringMode) ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:(hasFile && ed.monitoringMode) ? NSControlStateValueOn : NSControlStateValueOff];
         return hasFile;
     }
     if (action == @selector(showSummary:))       return ed != nil;
     if (action == @selector(focusOnAnotherView:)) return (vHasTabs || hHasTabs);
     if (action == @selector(setTextDirectionRTL:)) {
-        [(NSMenuItem *)item setState:ed.isTextDirectionRTL ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:ed.isTextDirectionRTL ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
     if (action == @selector(setTextDirectionLTR:)) {
-        [(NSMenuItem *)item setState:!ed.isTextDirectionRTL ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:!ed.isTextDirectionRTL ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
 
@@ -5372,13 +5379,13 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
     if (action == @selector(pinCurrentTab:) || action == @selector(lockCurrentTab:)) {
         NSInteger sel = _activeTabManager.tabBar.selectedIndex;
         BOOL pinned = (sel >= 0 && [_activeTabManager.tabBar isTabPinnedAtIndex:sel]);
-        [(NSMenuItem *)item setState:pinned ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:pinned ? NSControlStateValueOn : NSControlStateValueOff];
         return sel >= 0;
     }
 
     // Tab Wrap checkmark
     if (action == @selector(toggleTabBarWrap:)) {
-        [(NSMenuItem *)item setState:[[NSUserDefaults standardUserDefaults] boolForKey:kPrefTabBarWrap]
+        [mi setState:[[NSUserDefaults standardUserDefaults] boolForKey:kPrefTabBarWrap]
             ? NSControlStateValueOn : NSControlStateValueOff];
         return YES;
     }
@@ -5400,76 +5407,76 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
 
     // Spell check checkmark
     if (action == @selector(toggleSpellCheck:)) {
-        [(NSMenuItem *)item setState:ed.spellCheckEnabled ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:ed.spellCheckEnabled ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
 
     // Begin/End Select: checkmark when active; disable the other mode while one is active
     if (action == @selector(beginEndSelect:)) {
         BOOL active = ed.beginSelectActive;
-        [(NSMenuItem *)item setState:active ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:active ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
     if (action == @selector(beginEndSelectColumnMode:)) {
         BOOL active = ed.beginSelectActive;
-        [(NSMenuItem *)item setState:active ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:active ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
 
     // EOL Conversion: checkmark on active mode; disable (dim) the currently-active mode
     if (action == @selector(setEOLCRLF:)) {
         sptr_t mode = ed ? [ed.scintillaView message:SCI_GETEOLMODE] : -1;
-        [(NSMenuItem *)item setState:mode == SC_EOL_CRLF ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:mode == SC_EOL_CRLF ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil && mode != SC_EOL_CRLF;
     }
     if (action == @selector(setEOLLF:)) {
         sptr_t mode = ed ? [ed.scintillaView message:SCI_GETEOLMODE] : -1;
-        [(NSMenuItem *)item setState:mode == SC_EOL_LF ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:mode == SC_EOL_LF ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil && mode != SC_EOL_LF;
     }
     if (action == @selector(setEOLCR:)) {
         sptr_t mode = ed ? [ed.scintillaView message:SCI_GETEOLMODE] : -1;
-        [(NSMenuItem *)item setState:mode == SC_EOL_CR ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:mode == SC_EOL_CR ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil && mode != SC_EOL_CR;
     }
 
     // View > Show White Space / EOL: checkmark reflecting current state
     if (action == @selector(showWhiteSpaceAndTab:)) {
         BOOL shown = ed && ([ed.scintillaView message:SCI_GETVIEWWS] == SCWS_VISIBLEALWAYS);
-        [(NSMenuItem *)item setState:shown ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:shown ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
     if (action == @selector(showEndOfLine:)) {
         BOOL shown = ed && ([ed.scintillaView message:SCI_GETVIEWEOL] != 0);
-        [(NSMenuItem *)item setState:shown ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:shown ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
     if (action == @selector(toggleShowAllChars:)) {
         BOOL wsOn  = ed && ([ed.scintillaView message:SCI_GETVIEWWS] == SCWS_VISIBLEALWAYS);
         BOOL eolOn = ed && ([ed.scintillaView message:SCI_GETVIEWEOL] != 0);
-        [(NSMenuItem *)item setState:(wsOn && eolOn) ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:(wsOn && eolOn) ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
     if (action == @selector(toggleIndentGuides:)) {
-        [(NSMenuItem *)item setState:_showIndentGuides ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:_showIndentGuides ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
     if (action == @selector(toggleLineNumbers:)) {
-        [(NSMenuItem *)item setState:_showLineNumbers ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:_showLineNumbers ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
     if (action == @selector(toggleWrapSymbol:)) {
         BOOL on = ed && ([ed.scintillaView message:SCI_GETWRAPVISUALFLAGS] != 0);
-        [(NSMenuItem *)item setState:on ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:on ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
     if (action == @selector(toggleHideLineMarks:)) {
         BOOL hidden = ed && ([ed.scintillaView message:SCI_GETMARGINWIDTHN wParam:1] == 0);
-        [(NSMenuItem *)item setState:hidden ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:hidden ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
     if (action == @selector(toggleWordWrap:)) {
-        [(NSMenuItem *)item setState:(ed && ed.wordWrapEnabled) ? NSControlStateValueOn : NSControlStateValueOff];
+        [mi setState:(ed && ed.wordWrapEnabled) ? NSControlStateValueOn : NSControlStateValueOff];
         return ed != nil;
     }
 
@@ -5497,7 +5504,7 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
         };
         NSString *match = encMap[NSStringFromSelector(action)];
         if (match) {
-            [(NSMenuItem *)item setState:[encName isEqualToString:match] ? NSControlStateValueOn : NSControlStateValueOff];
+            [mi setState:[encName isEqualToString:match] ? NSControlStateValueOn : NSControlStateValueOff];
             return ed != nil;
         }
     }
@@ -5517,14 +5524,14 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
     if (action == @selector(setLanguageFromMenu:)) {
         NSString *langCode = [(NSMenuItem *)item representedObject];
         NSString *current  = ed.currentLanguage ?: @"";
-        [(NSMenuItem *)item setState:[current isEqualToString:langCode]
+        [mi setState:[current isEqualToString:langCode]
             ? NSControlStateValueOn : NSControlStateValueOff];
         return YES;
     }
     if (action == @selector(setUDLLanguageFromMenu:)) {
         NSString *udlName = [(NSMenuItem *)item representedObject];
         NSString *current = ed.currentLanguage ?: @"";
-        [(NSMenuItem *)item setState:[current isEqualToString:udlName]
+        [mi setState:[current isEqualToString:udlName]
             ? NSControlStateValueOn : NSControlStateValueOff];
         return YES;
     }
