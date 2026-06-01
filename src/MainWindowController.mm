@@ -1670,22 +1670,23 @@ static NSDictionary<NSString *, NSArray *> *toolbarGroupMap(void) {
     };
 }
 
-// Tahoe profile toolbar grouping: ordered [groupLabel, [button identifiers]].
-// Each becomes an NSToolbarItemGroup (→ a Liquid Glass capsule on macOS 26). This
-// is a SEPARATE construction from the Classic toolbarGroupMap (parallel-paths) —
-// it includes the view-toggle buttons (Classic handles those specially). First
-// 3c slice: plain labeled subitems; dropdowns/segmented/plugins come later.
+// Tahoe profile toolbar grouping: ordered [groupLabel, [primary ids], [overflow ids]].
+// Each becomes an NSToolbarItemGroup (→ a Liquid Glass capsule on macOS 26) showing
+// the PRIMARY buttons plus, when overflow is non-empty, a trailing ▾ menu button
+// (NSMenuToolbarItem) exposing the rest. Separate construction from the Classic
+// toolbarGroupMap (parallel-paths); includes the view-toggle buttons (Classic
+// handles those specially). No vertical dividers between Tahoe groups (by design).
 static NSArray<NSArray *> *tahoeToolbarGroups(void) {
     return @[
-        @[@"File",    @[kTBNew, kTBOpen, kTBSave, kTBSaveAll, kTBClose, kTBCloseAll, kTBPrint]],
-        @[@"Edit",    @[kTBCut, kTBCopy, kTBPaste, kTBUndo, kTBRedo]],
-        @[@"Find",    @[kTBFind, kTBFindRep]],
-        @[@"Zoom",    @[kTBZoomIn, kTBZoomOut]],
-        @[@"View",    @[kTBWrap, kTBAllChars, kTBIndentGuide]],
-        @[@"Sync",    @[kTBSyncV, kTBSyncH]],
-        @[@"Panels",  @[kTBUDL, kTBDocMap, kTBDocList, kTBFuncList, kTBFileBrowser]],
-        @[@"Monitor", @[kTBMonitor]],
-        @[@"Macro",   @[kTBStartRecord, kTBStopRecord, kTBPlayRecord, kTBPlayRecordM, kTBSaveRecord]],
+        @[@"File",    @[kTBNew, kTBOpen, kTBSave],            @[kTBSaveAll, kTBClose, kTBCloseAll, kTBPrint]],
+        @[@"Edit",    @[kTBCopy, kTBPaste, kTBUndo, kTBRedo], @[kTBCut]],
+        @[@"Find",    @[kTBFind],                             @[kTBFindRep]],
+        @[@"Zoom",    @[kTBZoomIn, kTBZoomOut],               @[]],
+        @[@"View",    @[kTBWrap, kTBIndentGuide],             @[kTBAllChars]],
+        @[@"Sync",    @[kTBSyncV],                            @[kTBSyncH]],
+        @[@"Panels",  @[kTBDocList, kTBFileBrowser],          @[kTBUDL, kTBDocMap, kTBFuncList]],
+        @[@"Monitor", @[kTBMonitor],                          @[]],
+        @[@"Macro",   @[kTBStartRecord, kTBStopRecord],       @[kTBPlayRecord, kTBPlayRecordM, kTBSaveRecord]],
     ];
 }
 
@@ -2441,40 +2442,79 @@ static NSToolbarItemIdentifier const kTBUserConfig = @"TB_UserConfig";
         NSString *label = [ident substringFromIndex:kTBTahoeGroupPrefix.length];
         for (NSArray *g in tahoeToolbarGroups())
             if ([g[0] isEqualToString:label])
-                return [self makeTahoeGroupToolbarItem:ident label:label identifiers:g[1]];
+                return [self makeTahoeGroupToolbarItem:ident label:label
+                                               primary:g[1] overflow:g[2]];
         return nil;
     }
     return [self _classicToolbarItemForIdentifier:ident];
 }
 
-// Build one Tahoe group: per-button NSToolbarItem subitems (current PNG icons +
-// labels) wrapped in an NSToolbarItemGroup. On macOS 26 the group renders as a
-// Liquid Glass capsule; on older macOS as a plain labeled group. Respects the
-// toolbar-config hidden-button set. (First slice: momentary buttons, no
-// dropdowns/segmented/toggle-state — those are later slices.)
+// Build one Tahoe NSToolbarItem subitem (current PNG icon + label) for a button id.
+- (nullable NSToolbarItem *)_tahoeSubitemForButton:(NSString *)btnId
+                                              desc:(NSArray *)desc
+                                            iconSz:(CGFloat)iconSz {
+    NSToolbarItem *sub = [[NSToolbarItem alloc]
+        initWithItemIdentifier:[@"TBT_" stringByAppendingString:btnId]];
+    NSImage *img = nppToolbarIcon(desc[3]);
+    if (img) { img.size = NSMakeSize(iconSz, iconSz); sub.image = img; }
+    sub.label        = desc[1];
+    sub.paletteLabel = desc[1];
+    sub.toolTip      = desc[2];
+    sub.target       = self;
+    sub.action       = NSSelectorFromString(desc[4]);
+    return sub;
+}
+
+// Build one Tahoe group: PRIMARY buttons as per-button NSToolbarItem subitems
+// (current PNG icons + labels), plus — when overflow is non-empty — a trailing ▾
+// NSMenuToolbarItem whose menu exposes the remaining buttons. Wrapped in an
+// NSToolbarItemGroup (→ Liquid Glass capsule on macOS 26, plain labeled group
+// otherwise). Respects the toolbar-config hidden-button set. No vertical dividers.
 - (NSToolbarItem *)makeTahoeGroupToolbarItem:(NSString *)groupIdent
                                        label:(NSString *)groupLabel
-                                 identifiers:(NSArray *)idents {
+                                     primary:(NSArray *)primaryIds
+                                    overflow:(NSArray *)overflowIds {
     NSMutableDictionary *descMap = [NSMutableDictionary dictionary];
     for (NSArray *d in toolbarDescriptors()) descMap[d[0]] = d;
     NSSet *hiddenIDs = _toolbarConfig[@"hiddenIDs"];
     const CGFloat iconSz = [NppThemeManager shared].toolbarMetrics.iconSize;
 
     NSMutableArray<NSToolbarItem *> *subs = [NSMutableArray array];
-    for (NSString *btnId in idents) {
+    for (NSString *btnId in primaryIds) {
         if ([hiddenIDs containsObject:btnId]) continue;
         NSArray *desc = descMap[btnId];
         if (!desc) continue;
-        NSToolbarItem *sub = [[NSToolbarItem alloc]
-            initWithItemIdentifier:[@"TBT_" stringByAppendingString:btnId]];
-        NSImage *img = nppToolbarIcon(desc[3]);
-        if (img) { img.size = NSMakeSize(iconSz, iconSz); sub.image = img; }
-        sub.label        = desc[1];
-        sub.paletteLabel = desc[1];
-        sub.toolTip      = desc[2];
-        sub.target       = self;
-        sub.action       = NSSelectorFromString(desc[4]);
-        [subs addObject:sub];
+        NSToolbarItem *sub = [self _tahoeSubitemForButton:btnId desc:desc iconSz:iconSz];
+        if (sub) [subs addObject:sub];
+    }
+
+    // Trailing ▾ overflow menu (only if there are non-hidden overflow buttons).
+    if (overflowIds.count > 0) {
+        if (@available(macOS 10.15, *)) {
+            NSMenu *menu = [[NSMenu alloc] initWithTitle:groupLabel];
+            for (NSString *btnId in overflowIds) {
+                if ([hiddenIDs containsObject:btnId]) continue;
+                NSArray *desc = descMap[btnId];
+                if (!desc) continue;
+                NSMenuItem *mi = [[NSMenuItem alloc]
+                    initWithTitle:desc[1] action:NSSelectorFromString(desc[4]) keyEquivalent:@""];
+                mi.target = self;
+                NSImage *mIcon = nppToolbarIcon(desc[3]);
+                if (mIcon) { mIcon.size = NSMakeSize(16, 16); mi.image = mIcon; }
+                [menu addItem:mi];
+            }
+            if (menu.numberOfItems > 0) {
+                NSMenuToolbarItem *more = [[NSMenuToolbarItem alloc]
+                    initWithItemIdentifier:[@"TBT_more:" stringByAppendingString:groupLabel]];
+                more.menu  = menu;
+                more.image = [NSImage imageWithSystemSymbolName:@"ellipsis"
+                                         accessibilityDescription:@"More"];
+                more.label        = @"More";
+                more.paletteLabel = @"More";
+                more.toolTip      = [NSString stringWithFormat:@"More %@ commands", groupLabel];
+                [subs addObject:more];
+            }
+        }
     }
     if (subs.count == 0) return nil;
 
