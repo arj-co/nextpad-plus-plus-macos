@@ -184,6 +184,35 @@ static NSDictionary<NSString *, NSString *> *toolbarIconMapping(void) {
     }
 }
 
+// ── Tahoe presentation scaffolding (inert under Classic) ──────────────────────
+
+- (BOOL)usesGlassMaterials {
+    return self.effectiveAppearanceStyle == NppAppearanceTahoe;
+}
+
+- (NSVisualEffectMaterial)materialForRole:(NppMaterialRole)role {
+    // Tahoe materials. Only consulted when usesGlassMaterials == YES; the values
+    // may be refined in Step 3b/3c once seen against real glass.
+    switch (role) {
+        case NppMaterialRoleToolbar:     return NSVisualEffectMaterialHeaderView;
+        case NppMaterialRoleSidebar:     return NSVisualEffectMaterialSidebar;
+        case NppMaterialRolePanelHeader: return NSVisualEffectMaterialHeaderView;
+        case NppMaterialRoleStatusBar:   return NSVisualEffectMaterialUnderWindowBackground;
+    }
+    return NSVisualEffectMaterialWindowBackground;
+}
+
+- (NppToolbarMetrics)toolbarMetrics {
+    if (self.effectiveAppearanceStyle == NppAppearanceTahoe) {
+        // Relaxed placeholder — tuned in Step 3c against real glass.
+        return (NppToolbarMetrics){ .iconSize = 18, .buttonSize = 34,
+                                    .buttonSpacing = 6, .groupGap = 12, .cornerRadius = 7 };
+    }
+    // Classic — mirrors nppIconSize/nppBtnSize/nppSpacing/nppSepGap/nppToolbarCornerR.
+    return (NppToolbarMetrics){ .iconSize = 16, .buttonSize = 28,
+                                .buttonSpacing = 4, .groupGap = 9, .cornerRadius = 4.5 };
+}
+
 // ── Tab Bar Colors ───────────────────────────────────────────────────────────
 
 - (NSColor *)tabBarBackground {

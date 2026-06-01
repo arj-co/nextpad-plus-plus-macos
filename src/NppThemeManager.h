@@ -26,6 +26,26 @@ typedef NS_ENUM(NSInteger, NppAppearanceStyle) {
     NppAppearanceTahoe   = 2,  // Native Liquid Glass profile
 };
 
+/// Chrome regions that adopt translucent materials in the Tahoe profile. Used by
+/// -materialForRole: (Step 3b/3c). Inert under Classic (usesGlassMaterials == NO).
+typedef NS_ENUM(NSInteger, NppMaterialRole) {
+    NppMaterialRoleToolbar     = 0,  // unified toolbar / title-bar region
+    NppMaterialRoleSidebar     = 1,  // side-panel host
+    NppMaterialRolePanelHeader = 2,  // PanelFrame header
+    NppMaterialRoleStatusBar   = 3,  // bottom status bar
+};
+
+/// Per-profile toolbar metrics, in points. Classic mirrors today's compact values
+/// (nppIconSize/nppBtnSize/nppSpacing/nppSepGap/nppToolbarCornerR); Tahoe returns
+/// relaxed values. Consumed by the Tahoe toolbar builder (Step 3c).
+typedef struct {
+    CGFloat iconSize;
+    CGFloat buttonSize;
+    CGFloat buttonSpacing;
+    CGFloat groupGap;
+    CGFloat cornerRadius;
+} NppToolbarMetrics;
+
 /// Centralized theme manager. All UI components query this for colors and icon paths.
 /// Never hardcode colors — always go through NppThemeManager.
 @interface NppThemeManager : NSObject
@@ -47,6 +67,19 @@ typedef NS_ENUM(NSInteger, NppAppearanceStyle) {
 /// always Classic unless the user explicitly forces Tahoe; the Auto→Tahoe-on-
 /// macOS-26 resolution is enabled once the Tahoe profile is built.
 @property (nonatomic, readonly) NppAppearanceStyle effectiveAppearanceStyle;
+
+// ── Tahoe presentation scaffolding (inert under Classic) ──────────────────────
+
+/// YES when chrome should use translucent NSVisualEffectView materials (Tahoe).
+/// NO for Classic — chrome stays opaque exactly as today.
+@property (nonatomic, readonly) BOOL usesGlassMaterials;
+
+/// The NSVisualEffectView material for a chrome role. Only meaningful when
+/// usesGlassMaterials is YES; callers gate on that before applying it.
+- (NSVisualEffectMaterial)materialForRole:(NppMaterialRole)role;
+
+/// Toolbar metrics for the effective profile (see NppToolbarMetrics).
+@property (nonatomic, readonly) NppToolbarMetrics toolbarMetrics;
 
 // ── UI Colors ────────────────────────────────────────────────────────────────
 
