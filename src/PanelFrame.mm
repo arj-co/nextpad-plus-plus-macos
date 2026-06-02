@@ -208,6 +208,7 @@ static NSImage *_PFLoadIcon(NSString *name) {
     // the title-bar content. nil under Classic, so the Classic header (an opaque
     // tabBarBackground layer) is byte-for-byte unchanged.
     NSVisualEffectView *_headerVFX;
+    CGFloat        _headerH;       // title-bar height: 24 Classic / 28 Tahoe (sleeker)
     NSView        *_contentView;  // strong — we own the view we wrap
     // Collapsible chrome: when `popped`, both of these flip to 0 so the
     // content view takes over the full frame and there's no "double title
@@ -241,6 +242,10 @@ static NSImage *_PFLoadIcon(NSString *name) {
 
 - (void)_buildLayout {
     self.translatesAutoresizingMaskIntoConstraints = NO;
+    // Tahoe gets a slightly taller, lighter, more-padded header (sleeker, closer
+    // to the mockup). Classic keeps its exact 24pt / 11pt / 6pt metrics.
+    BOOL glass = [NppThemeManager shared].usesGlassMaterials;
+    _headerH = glass ? 28.0 : 24.0;
 
     // Title bar
     _titleBar = [[NSView alloc] init];
@@ -250,7 +255,7 @@ static NSImage *_PFLoadIcon(NSString *name) {
 
     _titleLabel = [NSTextField labelWithString:@""];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _titleLabel.font = [NSFont systemFontOfSize:11];
+    _titleLabel.font = [NSFont systemFontOfSize:(glass ? 13.0 : 11.0)];
     _titleLabel.textColor = [NSColor labelColor];
     _titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     [_titleBar addSubview:_titleLabel];
@@ -281,7 +286,7 @@ static NSImage *_PFLoadIcon(NSString *name) {
     _contentView.translatesAutoresizingMaskIntoConstraints = NO;
     [self addSubview:_contentView];
 
-    _titleBarHeight  = [_titleBar.heightAnchor  constraintEqualToConstant:24];
+    _titleBarHeight  = [_titleBar.heightAnchor  constraintEqualToConstant:_headerH];
     _separatorHeight = [_separator.heightAnchor constraintEqualToConstant:1];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -291,7 +296,7 @@ static NSImage *_PFLoadIcon(NSString *name) {
         [_titleBar.trailingAnchor  constraintEqualToAnchor:self.trailingAnchor],
         _titleBarHeight,
 
-        [_titleLabel.leadingAnchor  constraintEqualToAnchor:_titleBar.leadingAnchor constant:6],
+        [_titleLabel.leadingAnchor  constraintEqualToAnchor:_titleBar.leadingAnchor constant:(glass ? 11.0 : 6.0)],
         [_titleLabel.centerYAnchor  constraintEqualToAnchor:_titleBar.centerYAnchor],
         [_titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_popButton.leadingAnchor constant:-4],
 
@@ -380,7 +385,7 @@ static NSImage *_PFLoadIcon(NSString *name) {
         _titleBar.hidden  = YES;
         _separator.hidden = YES;
     } else {
-        _titleBarHeight.constant = 24;
+        _titleBarHeight.constant = _headerH;
         _separatorHeight.constant = 1;
         _titleBar.hidden  = NO;
         _separator.hidden = NO;

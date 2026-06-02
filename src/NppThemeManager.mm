@@ -196,7 +196,7 @@ static NSDictionary<NSString *, NSString *> *toolbarIconMapping(void) {
     switch (role) {
         case NppMaterialRoleToolbar:     return NSVisualEffectMaterialHeaderView;
         case NppMaterialRoleSidebar:     return NSVisualEffectMaterialSidebar;
-        case NppMaterialRolePanelHeader: return NSVisualEffectMaterialHeaderView;
+        case NppMaterialRolePanelHeader: return NSVisualEffectMaterialTitlebar;  // lighter/sleeker than HeaderView
         case NppMaterialRoleStatusBar:   return NSVisualEffectMaterialUnderWindowBackground;
     }
     return NSVisualEffectMaterialWindowBackground;
