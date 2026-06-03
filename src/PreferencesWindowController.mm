@@ -332,6 +332,13 @@ NSString *const kPrefStyleFontSize      = @"styleFontSize";
         [loc translate:@"Performance"],
         [loc translate:@"MISC."],
     ]];
+    // Tahoe group: only under the Liquid Glass appearance (Classic Prefs unchanged).
+    if ([NppThemeManager shared].usesGlassMaterials) {
+        NSString *tahoe = [loc translate:@"Tahoe"];
+        NSUInteger dm = [_pageNames indexOfObject:[loc translate:@"Dark Mode"]];
+        if (dm != NSNotFound) [_pageNames insertObject:tahoe atIndex:dm + 1];
+        else [_pageNames addObject:tahoe];
+    }
     // Invalidate cached page views so they rebuild with new translations
     [_pageViews removeAllObjects];
     [_sidebarTable reloadData];
@@ -384,6 +391,13 @@ NSString *const kPrefStyleFontSize      = @"styleFontSize";
         [[NppLocalizer shared] translate:@"Performance"],
         [[NppLocalizer shared] translate:@"MISC."],
     ]];
+    // Tahoe group: only under the Liquid Glass appearance (Classic Prefs unchanged).
+    if ([NppThemeManager shared].usesGlassMaterials) {
+        NSString *tahoe = [[NppLocalizer shared] translate:@"Tahoe"];
+        NSUInteger dm = [_pageNames indexOfObject:[[NppLocalizer shared] translate:@"Dark Mode"]];
+        if (dm != NSNotFound) [_pageNames insertObject:tahoe atIndex:dm + 1];
+        else [_pageNames addObject:tahoe];
+    }
     _pageViews = [NSMutableDictionary dictionary];
 
     // ── Sidebar (source list table view) ─────────────────────────────────────
@@ -608,6 +622,7 @@ NSString *const kPrefStyleFontSize      = @"styleFontSize";
     if ([name isEqualToString:[loc translate:@"Indentation"]])    return [self _buildIndentationPage];
     if ([name isEqualToString:[loc translate:@"Tab Bar"]])         return [self _buildTabBarPage];
     if ([name isEqualToString:[loc translate:@"Dark Mode"]])       return [self _buildDarkModePage];
+    if ([name isEqualToString:[loc translate:@"Tahoe"]])           return [self _buildTahoePage];
     if ([name isEqualToString:[loc translate:@"Margins"]])          return [self _buildMarginsPage];
     if ([name isEqualToString:[loc translate:@"New Document"]])     return [self _buildNewDocPage];
     if ([name isEqualToString:[loc translate:@"Backup"]])           return [self _buildBackupPage];
@@ -772,58 +787,66 @@ NSString *const kPrefStyleFontSize      = @"styleFontSize";
     note.frame = NSMakeRect(38, y - 18, 400, 34);
     [v addSubview:note];
 
-    // ── Tahoe toolbar group editor — GATED: only shown under the Liquid Glass
-    //    (Tahoe) appearance, so the Classic Toolbar page is byte-identical. ──
-    if ([NppThemeManager shared].usesGlassMaterials) {
-        CGFloat ty = y - 18 - 36;   // below the colorization note
+    return v;
+}
 
-        NSTextField *th = [NSTextField labelWithString:[loc translate:@"Tahoe Toolbar Groups"]];
-        th.font = [NSFont boldSystemFontOfSize:NSFont.systemFontSize];
-        th.frame = NSMakeRect(20, ty, 360, 20); [v addSubview:th];
-        ty -= 8;
+#pragma mark - Tahoe Page (gated — Liquid Glass appearance only)
 
-        NSTextField *help = [NSTextField wrappingLabelWithString:[loc translate:
-            @"Choose where each button appears in the Liquid Glass toolbar: on the "
-            @"group capsule (Toolbar), in the group's ▾ overflow menu, or Hidden."]];
-        help.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
-        help.textColor = NSColor.secondaryLabelColor;
-        help.frame = NSMakeRect(20, ty - 36, 440, 34); [v addSubview:help];
-        ty -= 36 + 12;
+// A dedicated "Tahoe" Preferences group. The sidebar row is added only under the
+// Tahoe appearance (see _pageNames build sites), so Classic Preferences is
+// unchanged. Currently hosts the toolbar group editor; future Tahoe-only settings
+// land here too.
+- (NSView *)_buildTahoePage {
+    NSView *v = [[NSView alloc] init];
+    NppLocalizer *loc = [NppLocalizer shared];
+    CGFloat y = 380;
 
-        [self _buildTahoeEditGroups];
+    NSTextField *th = [NSTextField labelWithString:[loc translate:@"Toolbar Groups"]];
+    th.font = [NSFont boldSystemFontOfSize:NSFont.systemFontSize];
+    th.frame = NSMakeRect(20, y, 360, 20); [v addSubview:th];
+    y -= 26;
 
-        const CGFloat outlineH = 320;
-        NSScrollView *sc = [[NSScrollView alloc] initWithFrame:
-            NSMakeRect(20, ty - outlineH, 460, outlineH)];
-        sc.hasVerticalScroller = YES;
-        sc.borderType = NSBezelBorder;
-        sc.autohidesScrollers = YES;
+    NSTextField *help = [NSTextField wrappingLabelWithString:[loc translate:
+        @"Choose where each button appears in the Liquid Glass toolbar: on the "
+        @"group capsule (Toolbar), in the group's ▾ overflow menu, or Hidden."]];
+    help.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    help.textColor = NSColor.secondaryLabelColor;
+    help.frame = NSMakeRect(20, y - 34, 440, 34); [v addSubview:help];
+    y -= 34 + 14;
 
-        NSOutlineView *ov = [[NSOutlineView alloc] initWithFrame:sc.bounds];
-        NSTableColumn *nameCol = [[NSTableColumn alloc] initWithIdentifier:@"name"];
-        nameCol.title = [loc translate:@"Button"]; nameCol.width = 280; nameCol.minWidth = 160;
-        NSTableColumn *placeCol = [[NSTableColumn alloc] initWithIdentifier:@"placement"];
-        placeCol.title = [loc translate:@"Placement"]; placeCol.width = 150; placeCol.minWidth = 120;
-        [ov addTableColumn:nameCol];
-        [ov addTableColumn:placeCol];
-        ov.outlineTableColumn = nameCol;
-        ov.dataSource = self;
-        ov.delegate = self;
-        ov.indentationPerLevel = 14;
-        ov.allowsColumnResizing = YES;
-        ov.usesAlternatingRowBackgroundColors = YES;
-        sc.documentView = ov;
-        [v addSubview:sc];
-        _tahoeOutline = ov;
-        [ov reloadData];
-        [ov expandItem:nil expandChildren:YES];
-        ty -= outlineH + 10;
+    [self _buildTahoeEditGroups];
 
-        NSButton *reset = [NSButton buttonWithTitle:[loc translate:@"Reset to Defaults"]
-                                             target:self action:@selector(_tahoeResetGroups:)];
-        reset.bezelStyle = NSBezelStyleRounded;
-        reset.frame = NSMakeRect(20, ty - 6, 170, 26); [v addSubview:reset];
-    }
+    const CGFloat outlineH = 340;
+    NSScrollView *sc = [[NSScrollView alloc] initWithFrame:
+        NSMakeRect(20, y - outlineH, 460, outlineH)];
+    sc.hasVerticalScroller = YES;
+    sc.borderType = NSBezelBorder;
+    sc.autohidesScrollers = YES;
+
+    NSOutlineView *ov = [[NSOutlineView alloc] initWithFrame:sc.bounds];
+    NSTableColumn *nameCol = [[NSTableColumn alloc] initWithIdentifier:@"name"];
+    nameCol.title = [loc translate:@"Button"]; nameCol.width = 280; nameCol.minWidth = 160;
+    NSTableColumn *placeCol = [[NSTableColumn alloc] initWithIdentifier:@"placement"];
+    placeCol.title = [loc translate:@"Placement"]; placeCol.width = 150; placeCol.minWidth = 120;
+    [ov addTableColumn:nameCol];
+    [ov addTableColumn:placeCol];
+    ov.outlineTableColumn = nameCol;
+    ov.dataSource = self;
+    ov.delegate = self;
+    ov.indentationPerLevel = 14;
+    ov.allowsColumnResizing = YES;
+    ov.usesAlternatingRowBackgroundColors = YES;
+    sc.documentView = ov;
+    [v addSubview:sc];
+    _tahoeOutline = ov;
+    [ov reloadData];
+    [ov expandItem:nil expandChildren:YES];
+    y -= outlineH + 12;
+
+    NSButton *reset = [NSButton buttonWithTitle:[loc translate:@"Reset to Defaults"]
+                                         target:self action:@selector(_tahoeResetGroups:)];
+    reset.bezelStyle = NSBezelStyleRounded;
+    reset.frame = NSMakeRect(20, y - 6, 170, 26); [v addSubview:reset];
 
     return v;
 }
