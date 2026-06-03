@@ -3706,6 +3706,18 @@ static BOOL groupHasTrailingSep(NSString *ident) {
     [_statusBar addSubview:_statusRight];
     [_statusBar addSubview:_gitBranchLabel];
 
+    // Issue #174: double-clicking the language token in the status bar opens the
+    // Language menu (Windows parity). Purely additive — an invisible recognizer
+    // on the bar; the status labels and layout are untouched, so the bar looks
+    // identical in Classic and Tahoe. The handler hit-tests the language token's
+    // x-range so only that part responds.
+    NSClickGestureRecognizer *langClick =
+        [[NSClickGestureRecognizer alloc] initWithTarget:self
+                                                  action:@selector(_statusBarDoubleClicked:)];
+    langClick.numberOfClicksRequired = 2;
+    langClick.delaysPrimaryMouseButtonEvents = NO;
+    [_statusBar addGestureRecognizer:langClick];
+
     [NSLayoutConstraint activateConstraints:@[
         [sep.topAnchor constraintEqualToAnchor:_statusBar.topAnchor],
         [sep.leadingAnchor constraintEqualToAnchor:_statusBar.leadingAnchor],
@@ -10299,6 +10311,43 @@ static NSString *languageDisplayName(NSString *langCode) {
     NSString *mode = ed.isOverwriteMode ? @"OVR" : @"INS";
     _statusRight.stringValue = [NSString stringWithFormat:@"%@  |  %@  |  %@  |  %@",
                                  lang, ed.encodingName, ed.eolName, mode];
+}
+
+// Issue #174: double-click on the language token (the leftmost segment of the
+// right-aligned status string) opens the Language menu, like Notepad++ on
+// Windows. Only the language token responds — the encoding/EOL/mode segments are
+// ignored — and nothing about the status bar's appearance changes.
+- (void)_statusBarDoubleClicked:(NSClickGestureRecognizer *)gr {
+    EditorView *ed = [self currentEditor];
+    if (!ed || !_statusRight.stringValue.length) return;
+
+    // Compute the language token's x-range inside the right-aligned label by
+    // measuring text widths with the field's own font. The text hugs the field's
+    // right edge, so the language token starts at (fieldRight - fullWidth).
+    NSString *full = _statusRight.stringValue;
+    NSString *lang = languageDisplayName(ed.currentLanguage);
+    NSDictionary *attrs = @{ NSFontAttributeName: _statusRight.font };
+    CGFloat wFull = [full sizeWithAttributes:attrs].width;
+    CGFloat wLang = [lang sizeWithAttributes:attrs].width;
+    const NSRect fr = _statusRight.frame;            // already in _statusBar coords
+    const CGFloat textLeft = NSMaxX(fr) - wFull;
+
+    const NSPoint p = [gr locationInView:_statusBar];
+    const CGFloat pad = 6.0;                          // forgiving hit area
+    if (p.x < textLeft - pad || p.x > textLeft + wLang + pad) return;
+
+    // Pop up the LIVE menu-bar Language submenu (locale-stable tag) so its
+    // delegate-driven parent-letter checkmark, the current-language leaf check,
+    // and the dynamic User-Defined-Language list all come for free. Anchored at
+    // the language token; AppKit flips it upward at the screen bottom so it sits
+    // just above the status bar (matching the Windows placement).
+    NSMenu *langMenu = nil;
+    for (NSMenuItem *it in [NSApp mainMenu].itemArray)
+        if (it.tag == kMenuTagLanguage && it.submenu) { langMenu = it.submenu; break; }
+    if (!langMenu) return;
+    [langMenu popUpMenuPositioningItem:nil
+                            atLocation:NSMakePoint(textLeft, NSMaxY(_statusBar.bounds))
+                                inView:_statusBar];
 }
 
 - (void)refreshCurrentTab {
