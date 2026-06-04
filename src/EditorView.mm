@@ -5,6 +5,7 @@
 #import "NppBuiltinLanguages.h"
 #import "NppPluginManager.h"
 #import "PreferencesWindowController.h"
+#import "SearchEngine.h"   // #166 Phase 1: replay Windows Find/Replace (type-3) macros
 
 // NPPN_* constants (from NppPluginInterfaceMac.h — not included directly
 // to avoid SendMessage macro conflicts in host code)
@@ -3674,6 +3675,78 @@ static NSRegularExpression *nppClickableSchemeRegex(NSString *schemes) {
 
 - (NSArray<NSDictionary *> *)macroActions { return [_macroActions copy]; }
 
+#pragma mark - Find/Replace macro replay (#166 — Windows mtSavedSnR / type 3)
+
+// Decode the 1702 booleans bitmask (Windows IDF_* control bits) into the options.
+- (void)_applySnRBooleans:(int)b toOptions:(NPPFindOptions *)o {
+    o.wholeWord         = (b & 1)    != 0;   // IDF_WHOLEWORD
+    o.matchCase         = (b & 2)    != 0;   // IDF_MATCHCASE
+    o.doPurge           = (b & 4)    != 0;   // IDF_PURGE_CHECK
+    o.doBookmarkLine    = (b & 16)   != 0;   // IDF_MARKLINE_CHECK
+    o.inSelection       = (b & 128)  != 0;   // IDF_IN_SELECTION_CHECK
+    o.wrapAround        = (b & 256)  != 0;   // IDF_WRAP
+    o.dotMatchesNewline = (b & 1024) != 0;   // IDF_REDOTMATCHNL
+    o.direction         = (b & 512) ? NPPSearchDown : NPPSearchUp;  // IDF_WHICH_DIRECTION (set=down)
+}
+
+// Run the accumulated Find/Replace operation for an EXEC (1701) command. The
+// macOS SearchEngine handles regex/extended modes and the #151 empty-match loop
+// semantics internally, so we just hand it the options.
+- (void)_execSnRCommand:(int)cmd options:(NPPFindOptions *)o {
+    if (!o) { NSLog(@"[Macro] Find/Replace EXEC with no pending options (skipped)"); return; }
+    if (!o.searchText.length) return;   // nothing to search for
+    ScintillaView *sci = _scintillaView;
+    // Replace All / Mark All operate on the WHOLE document (or the selection) by
+    // definition — Windows macros don't record a wrap bit for them. SearchEngine
+    // only covers the whole doc when wrapAround is set, so force it (unless the
+    // op is scoped to the selection), otherwise it would search only cursor→end.
+    if (!o.inSelection && (cmd == 1609 || cmd == 1615)) o.wrapAround = YES;
+    switch (cmd) {
+        case 1609: [SearchEngine replaceAllInView:sci options:o]; break;  // IDREPLACEALL
+        case 1608: [SearchEngine replaceInView:sci options:o];    break;  // IDREPLACE
+        case 1:    [SearchEngine findInView:sci options:o forward:(o.direction == NPPSearchDown)]; break; // IDOK (Find Next)
+        case 1615: [SearchEngine markAllInView:sci options:o];    break;  // IDCMARKALL
+        default:
+            // Find All / Count / Find-in-Files EXECs are not supported in v1.
+            NSLog(@"[Macro] unsupported Find/Replace command=%d (skipped)", cmd);
+    }
+}
+
+// Process one type-3 step. INIT(1700) starts a fresh op; field/option messages
+// fill it in; EXEC(1701) runs it and returns nil so the next op starts clean.
+// Returns the (possibly new) pending options to carry across loop iterations.
+- (NPPFindOptions *)_snrMacroStep:(int)msg lParam:(long long)lp
+                           sParam:(NSString *)sParam pending:(NPPFindOptions *)opts {
+    switch (msg) {
+        case 1700:  // IDC_FRCOMMAND_INIT
+            return [[NPPFindOptions alloc] init];
+        case 1601:  // IDFINDWHAT
+            if (!opts) opts = [[NPPFindOptions alloc] init];
+            opts.searchText = sParam ?: @"";
+            return opts;
+        case 1602:  // IDREPLACEWITH
+            if (!opts) opts = [[NPPFindOptions alloc] init];
+            opts.replaceText = sParam ?: @"";
+            return opts;
+        case 1625:  // IDNORMAL — search mode (0 Normal / 1 Extended / 2 Regex)
+            if (!opts) opts = [[NPPFindOptions alloc] init];
+            if (lp >= NPPSearchNormal && lp <= NPPSearchRegex) opts.searchType = (NPPSearchType)lp;
+            return opts;
+        case 1702:  // IDC_FRCOMMAND_BOOLEANS
+            if (!opts) opts = [[NPPFindOptions alloc] init];
+            [self _applySnRBooleans:(int)lp toOptions:opts];
+            return opts;
+        case 1701:  // IDC_FRCOMMAND_EXEC
+            [self _execSnRCommand:(int)lp options:opts];
+            return nil;
+        default:
+            // Find-in-Files dir/filters combos or unknown — not handled in v1;
+            // keep the pending op so a later EXEC still runs.
+            NSLog(@"[Macro] unsupported Find/Replace step message=%d (ignored)", msg);
+            return opts;
+    }
+}
+
 - (void)runMacroActions:(NSArray<NSDictionary *> *)actions {
     if (!actions.count) { NSBeep(); return; }
     ScintillaView *sci = _scintillaView;
@@ -3695,6 +3768,10 @@ static NSRegularExpression *nppClickableSchemeRegex(NSString *schemes) {
     [tic deactivate];
 
     [sci message:SCI_BEGINUNDOACTION];
+    // #166 Phase 1: a type-3 (mtSavedSnR) Find/Replace operation spans several
+    // actions — INIT → set fields/options → EXEC. Accumulate them here; the
+    // helper builds/updates this and clears it on EXEC.
+    NPPFindOptions *snr = nil;
     for (NSDictionary *action in actions) {
         // ── Recorded format: menu command by selector name ──
         NSString *menuCmd = action[@"menuCommand"];
@@ -3721,8 +3798,15 @@ static NSRegularExpression *nppClickableSchemeRegex(NSString *schemes) {
             long long lp   = [action[@"lParam"] longLongValue];
             NSString *sParam = action[@"sParam"];
 
-            if (type == 2) {
-                // Menu command: sParam = macOS selector name
+            if (type == 3) {
+                // #166: Find/Replace step (mtSavedSnR) — Windows encodes a
+                // search/replace as a sequence of pseudo-messages routed to the
+                // Find dialog. Decode them into an NPPFindOptions and run the
+                // macOS SearchEngine on EXEC.
+                snr = [self _snrMacroStep:msg lParam:lp sParam:sParam pending:snr];
+            } else if (type == 2) {
+                // Menu command. macOS-recorded macros put the selector in sParam;
+                // Windows macros leave sParam empty and put the IDM_* in wParam.
                 if (sParam.length) {
                     if (wp != 0 && [sParam isEqualToString:@"pluginMenuAction:"]) {
                         // Plugin command: cmdID stored in wParam (see
@@ -3732,6 +3816,10 @@ static NSRegularExpression *nppClickableSchemeRegex(NSString *schemes) {
                         SEL menuAction = NSSelectorFromString(sParam);
                         [NSApp sendAction:menuAction to:nil from:self];
                     }
+                } else {
+                    // Windows menu command (IDM_* in wParam, no selector). Needs the
+                    // IDM→selector map (#166 Phase 2). Log so it isn't a silent no-op.
+                    NSLog(@"[Macro] Windows menu command IDM %lld not yet supported (Phase 2) — skipped", wp);
                 }
             } else if (type == 1 && sParam.length > 0) {
                 [sci message:(uint32_t)msg wParam:(uptr_t)wp lParam:(sptr_t)sParam.UTF8String];
