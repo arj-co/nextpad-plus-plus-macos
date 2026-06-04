@@ -19,6 +19,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)documentListPanel:(DocumentListPanel *)panel activateEditor:(EditorView *)editor;
 /// The currently-active editor across all views, for the selected-row highlight.
 - (nullable EditorView *)documentListPanelCurrentEditor:(DocumentListPanel *)panel;
+/// The tab color assigned to this document (nil if none) — used to tint the row,
+/// matching the colored tab.
+- (nullable NSColor *)documentListPanel:(DocumentListPanel *)panel
+              backgroundColorForEditor:(EditorView *)editor;
 @end
 
 /// Side panel that lists all open editor tabs and lets the user switch between

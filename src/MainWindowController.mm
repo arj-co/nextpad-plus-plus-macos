@@ -5481,6 +5481,18 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
     return [self currentEditor];
 }
 
+// The tab color for a document (matching the colored tab), found in whichever
+// view owns the editor. nil when the tab has no custom color.
+- (NSColor *)documentListPanel:(DocumentListPanel *)panel backgroundColorForEditor:(EditorView *)editor {
+    for (TabManager *mgr in @[_tabManager, _subTabManagerH, _subTabManagerV]) {
+        if (!mgr) continue;
+        NSUInteger idx = [mgr.allEditors indexOfObject:editor];
+        if (idx != NSNotFound)
+            return [NppTabBar tabFillColorForId:[mgr.tabBar tabColorAtIndex:(NSInteger)idx]];
+    }
+    return nil;
+}
+
 - (void)showClipboardHistory:(id)sender {
     if (!_clipboardPanel) {
         _clipboardPanel = [[ClipboardHistoryPanel alloc] init];
@@ -7605,6 +7617,8 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
     NSInteger idx = _activeTabManager.tabBar.selectedIndex;
     if (idx < 0) return;
     [_activeTabManager.tabBar setTabColorAtIndex:idx colorId:colorId];
+    // Re-tint the Document List row to match the colored tab right away.
+    if (_docListPanel) [_docListPanel reloadData];
 }
 
 - (void)applyTabColor1:(id)sender { [self _applyTabColor:0]; }

@@ -308,6 +308,10 @@ static void _docFields(EditorView *ed, NSString **outName,
     _docFields(ed, &name, &ext, &path);
 
     NSColor  *fg      = [[NPPStyleStore sharedStore] globalFg];
+    // The row tint is semi-transparent (50%), blending toward the theme
+    // background, so the theme foreground keeps good contrast over it in both
+    // light and dark mode — no special text color needed.
+    NSColor  *textColor = fg;
     NSFont   *font    = [NSFont systemFontOfSize:_panelFontSize];
     NSString *fullTip = ed.filePath ?: ed.displayName;
     NSString *colId   = tableColumn.identifier;
@@ -326,7 +330,7 @@ static void _docFields(EditorView *ed, NSString **outName,
         cv.imageView.image = [[NppThemeManager shared]
             toolbarIconNamed:(ed.isModified ? @"saveFileRed" : @"saveFile")];
         cv.textField.stringValue = name;
-        cv.textField.textColor   = fg;
+        cv.textField.textColor   = textColor;
         cv.textField.font        = font;
         return cv;
     }
@@ -335,9 +339,27 @@ static void _docFields(EditorView *ed, NSString **outName,
     if (!cv) cv = [self _makeTextCell];
     cv.toolTip = fullTip;
     cv.textField.stringValue = [colId isEqualToString:@"ext"] ? ext : path;
-    cv.textField.textColor   = fg;
+    cv.textField.textColor   = textColor;
     cv.textField.font        = font;
     return cv;
+}
+
+// The tab color assigned to this document (nil if none), via the delegate which
+// looks it up in whichever view owns the editor.
+- (nullable NSColor *)_rowColorForEditor:(EditorView *)ed {
+    if ([self.delegate respondsToSelector:@selector(documentListPanel:backgroundColorForEditor:)])
+        return [self.delegate documentListPanel:self backgroundColorForEditor:ed];
+    return nil;
+}
+
+// Tint the whole row with the document's tab color (matching Notepad++).
+// Runs on every row-view add (incl. reuse), so an uncolored row resets to clear.
+- (void)tableView:(NSTableView *)tableView
+    didAddRowView:(NSTableRowView *)rowView
+           forRow:(NSInteger)row {
+    if (row < 0 || row >= (NSInteger)_items.count) { rowView.backgroundColor = NSColor.clearColor; return; }
+    NSColor *c = [self _rowColorForEditor:_items[row]];
+    rowView.backgroundColor = c ? [c colorWithAlphaComponent:0.5] : NSColor.clearColor;
 }
 
 // ── Row click (left-click focuses the file — unchanged behaviour) ─────────────

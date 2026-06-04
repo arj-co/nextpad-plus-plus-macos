@@ -606,6 +606,10 @@ static const CGFloat kPinSize = 11.0; // pin icon drawn at ~80% of original ~14p
     return _items[index].colorId;
 }
 
++ (nullable NSColor *)tabFillColorForId:(NSInteger)colorId {
+    return tabColorForId(colorId);
+}
+
 #pragma mark - Tab item callbacks
 
 - (NSInteger)_dropTargetIndexForContainerPoint:(NSPoint)p fromIndex:(NSInteger)from {
