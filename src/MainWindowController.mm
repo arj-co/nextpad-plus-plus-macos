@@ -1916,6 +1916,12 @@ static void _nppTahoeRoundEditorCard(NSView *container, NSView *content) {
     // reclaims the strip. Toggled by -_applyTabBarVisibility:.
     NSLayoutConstraint *_primaryTabBarMinHeight;
     NSLayoutConstraint *_primaryTabBarZeroHeight;
+    // Same pair for the secondary split tab bars (horizontal/bottom + vertical/
+    // right), so "Hide tab bar" also collapses them in split view.
+    NSLayoutConstraint *_subTabBarHMinHeight;
+    NSLayoutConstraint *_subTabBarHZeroHeight;
+    NSLayoutConstraint *_subTabBarVMinHeight;
+    NSLayoutConstraint *_subTabBarVZeroHeight;
     NSTimer          *_autoSaveTimer;
     /// YES once restoreLastSession has successfully opened ≥1 tab from the
     /// stored session this launch. Used by saveSession to decide whether the
@@ -3599,8 +3605,6 @@ static BOOL groupHasTrailingSep(NSString *ident) {
         [primaryContentView.trailingAnchor constraintEqualToAnchor:primaryContainer.trailingAnchor],
         [primaryContentView.bottomAnchor constraintEqualToAnchor:primaryContainer.bottomAnchor],
     ]];
-    // Apply the persisted "Hide tab bar" state at launch.
-    [self _applyTabBarVisibility:[[NSUserDefaults standardUserDefaults] boolForKey:kPrefHideTabBar]];
 
     // ── Secondary TabManager (second view, starts collapsed) ──────────────────
     _subTabManagerH = [[TabManager alloc] init];
@@ -3618,11 +3622,14 @@ static BOOL groupHasTrailingSep(NSString *ident) {
     _subEditorContainerH.translatesAutoresizingMaskIntoConstraints = NO;
     [_subEditorContainerH addSubview:subTabBar];
     [_subEditorContainerH addSubview:subContentView];
+    // #183: swappable height so "Hide tab bar" collapses the bottom split's bar too.
+    _subTabBarHMinHeight  = [subTabBar.heightAnchor constraintGreaterThanOrEqualToConstant:25];
+    _subTabBarHZeroHeight = [subTabBar.heightAnchor constraintEqualToConstant:0];
     [NSLayoutConstraint activateConstraints:@[
         [subTabBar.topAnchor constraintEqualToAnchor:_subEditorContainerH.topAnchor],
         [subTabBar.leadingAnchor constraintEqualToAnchor:_subEditorContainerH.leadingAnchor],
         [subTabBar.trailingAnchor constraintEqualToAnchor:_subEditorContainerH.trailingAnchor],
-        [subTabBar.heightAnchor constraintGreaterThanOrEqualToConstant:25],
+        _subTabBarHMinHeight,
         [subContentView.topAnchor constraintEqualToAnchor:subTabBar.bottomAnchor],
         [subContentView.leadingAnchor constraintEqualToAnchor:_subEditorContainerH.leadingAnchor],
         [subContentView.trailingAnchor constraintEqualToAnchor:_subEditorContainerH.trailingAnchor],
@@ -3646,17 +3653,25 @@ static BOOL groupHasTrailingSep(NSString *ident) {
     _subEditorContainerV.translatesAutoresizingMaskIntoConstraints = NO;
     [_subEditorContainerV addSubview:subTabBarV];
     [_subEditorContainerV addSubview:subContentViewV];
+    // #183: swappable height so "Hide tab bar" collapses the right split's bar too.
+    _subTabBarVMinHeight  = [subTabBarV.heightAnchor constraintGreaterThanOrEqualToConstant:25];
+    _subTabBarVZeroHeight = [subTabBarV.heightAnchor constraintEqualToConstant:0];
     [NSLayoutConstraint activateConstraints:@[
         [subTabBarV.topAnchor constraintEqualToAnchor:_subEditorContainerV.topAnchor],
         [subTabBarV.leadingAnchor constraintEqualToAnchor:_subEditorContainerV.leadingAnchor],
         [subTabBarV.trailingAnchor constraintEqualToAnchor:_subEditorContainerV.trailingAnchor],
-        [subTabBarV.heightAnchor constraintGreaterThanOrEqualToConstant:25],
+        _subTabBarVMinHeight,
         [subContentViewV.topAnchor constraintEqualToAnchor:subTabBarV.bottomAnchor],
         [subContentViewV.leadingAnchor constraintEqualToAnchor:_subEditorContainerV.leadingAnchor],
         [subContentViewV.trailingAnchor constraintEqualToAnchor:_subEditorContainerV.trailingAnchor],
         [subContentViewV.bottomAnchor constraintEqualToAnchor:_subEditorContainerV.bottomAnchor],
     ]];
     _nppTahoeRoundEditorCard(_subEditorContainerV, subContentViewV);  // Tahoe rounded card (gated)
+
+    // #183: apply the persisted "Hide tab bar" state at launch — placed AFTER both
+    // secondary tab bars are built so all three bars (primary + H + V) are
+    // collapsed/shown together (their constraint ivars exist by this point).
+    [self _applyTabBarVisibility:[[NSUserDefaults standardUserDefaults] boolForKey:kPrefHideTabBar]];
 
     // ── Left/right split between primary and vertical secondary ───────────────
     _vSplitView = [[NppGapSplitView alloc] init];   // Tahoe: 12pt transparent gap between editor panes (gated)
@@ -5434,6 +5449,36 @@ static NSArray<NSDictionary *> *convertRecordedToXmlFormat(NSArray<NSDictionary 
 
 - (void)documentListPanelDidRequestClose:(DocumentListPanel *)panel {
     [self _setPanelVisible:panel title:@"Document List" show:NO];
+}
+
+// Document List sees ALL open editors across every view (primary + both split
+// panes), so tabs moved via "Move to Other …View" still appear and remain
+// reachable (important when the tab bar is hidden).
+- (NSArray<EditorView *> *)documentListPanelEditors:(DocumentListPanel *)panel {
+    NSMutableArray<EditorView *> *all = [NSMutableArray array];
+    for (TabManager *mgr in @[_tabManager, _subTabManagerH, _subTabManagerV]) {
+        if (mgr) [all addObjectsFromArray:mgr.allEditors];
+    }
+    return all;
+}
+
+// Activate a clicked editor in whichever view owns it. selectTabAtIndex: fires
+// tabManager:didSelectEditor:, which already sets _activeTabManager and focuses
+// the correct pane — so no extra bookkeeping here.
+- (BOOL)documentListPanel:(DocumentListPanel *)panel activateEditor:(EditorView *)editor {
+    for (TabManager *mgr in @[_tabManager, _subTabManagerH, _subTabManagerV]) {
+        if (!mgr) continue;
+        NSUInteger idx = [mgr.allEditors indexOfObject:editor];
+        if (idx != NSNotFound) {
+            [mgr selectTabAtIndex:(NSInteger)idx];
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (EditorView *)documentListPanelCurrentEditor:(DocumentListPanel *)panel {
+    return [self currentEditor];
 }
 
 - (void)showClipboardHistory:(id)sender {
@@ -9687,29 +9732,41 @@ static BOOL _writeCLIScript(NSString *script, NSString *path, NSError **outErr) 
 // height constraint (min-height <-> zero-height) so the editor fills the strip
 // when hidden, and toggles .hidden so it stops drawing. Primary tab bar only —
 // the secondary split tab bars are out of scope (they appear only in split mode).
-- (void)_applyTabBarVisibility:(BOOL)hide {
-    if (!_primaryTabBarMinHeight || !_primaryTabBarZeroHeight) return;  // not built yet
-    if (hide) {
-        _primaryTabBarMinHeight.active  = NO;    // deactivate the conflicting one first
-        _primaryTabBarZeroHeight.active = YES;
-    } else {
-        _primaryTabBarZeroHeight.active = NO;
-        _primaryTabBarMinHeight.active  = YES;
-    }
-    _tabManager.tabBar.hidden = hide;
-
-    // Tahoe polish: with the tab strip gone, the editor card's top-LEFT corner is
-    // now exposed (it was square because it sat under the first tab), so round it
-    // too; restore top-right-only when the bar returns. Gated to the glass profile.
+// #183: collapse or restore ONE tab bar — swap its height constraint (min <-> zero)
+// and toggle .hidden so the editor reclaims the strip; under the glass profile,
+// round the now-exposed top-left corner of its editor card (top-right-only when
+// shown). Guards on nil constraints so it's safe before that bar is built.
+- (void)_setTabBarHidden:(BOOL)hide
+                  tabBar:(NppTabBar *)tabBar
+               minHeight:(NSLayoutConstraint *)minC
+              zeroHeight:(NSLayoutConstraint *)zeroC
+             contentView:(NSView *)contentView {
+    if (!minC || !zeroC) return;
+    if (hide) { minC.active = NO; zeroC.active = YES; }   // deactivate conflicting one first
+    else      { zeroC.active = NO; minC.active = YES; }
+    tabBar.hidden = hide;
     if ([NppThemeManager shared].usesGlassMaterials) {
-        CALayer *contentLayer = _tabManager.contentView.layer;
-        if (contentLayer)
-            contentLayer.maskedCorners = hide
+        CALayer *cl = contentView.layer;
+        if (cl)
+            cl.maskedCorners = hide
                 ? (kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner)   // top-left + top-right
                 : kCALayerMaxXMaxYCorner;                            // top-right only
     }
+    [tabBar.superview layoutSubtreeIfNeeded];
+}
 
-    [_tabManager.tabBar.superview layoutSubtreeIfNeeded];
+// #183: apply the "Hide tab bar" state to the primary AND both secondary (split)
+// tab bars, so a hidden bar stays hidden in split view too.
+- (void)_applyTabBarVisibility:(BOOL)hide {
+    [self _setTabBarHidden:hide tabBar:_tabManager.tabBar
+                 minHeight:_primaryTabBarMinHeight zeroHeight:_primaryTabBarZeroHeight
+               contentView:_tabManager.contentView];
+    [self _setTabBarHidden:hide tabBar:_subTabManagerH.tabBar
+                 minHeight:_subTabBarHMinHeight zeroHeight:_subTabBarHZeroHeight
+               contentView:_subTabManagerH.contentView];
+    [self _setTabBarHidden:hide tabBar:_subTabManagerV.tabBar
+                 minHeight:_subTabBarVMinHeight zeroHeight:_subTabBarVZeroHeight
+               contentView:_subTabManagerV.contentView];
 }
 
 - (void)_prefsChanged:(NSNotification *)n {

@@ -4,9 +4,21 @@
 NS_ASSUME_NONNULL_BEGIN
 
 @class DocumentListPanel;
+@class EditorView;
 
 @protocol DocumentListPanelDelegate <NSObject>
 - (void)documentListPanelDidRequestClose:(DocumentListPanel *)panel;
+@optional
+/// All open editors across every view (primary + both split panes). When
+/// implemented, the panel lists these instead of just the primary tab manager's
+/// editors — so tabs moved to a split view still appear. Falls back to the
+/// primary tab manager when not implemented.
+- (NSArray<EditorView *> *)documentListPanelEditors:(DocumentListPanel *)panel;
+/// Activate an editor that may live in any view (primary or a split pane).
+/// Return YES if handled; the panel falls back to the primary tab manager on NO.
+- (BOOL)documentListPanel:(DocumentListPanel *)panel activateEditor:(EditorView *)editor;
+/// The currently-active editor across all views, for the selected-row highlight.
+- (nullable EditorView *)documentListPanelCurrentEditor:(DocumentListPanel *)panel;
 @end
 
 /// Side panel that lists all open editor tabs and lets the user switch between

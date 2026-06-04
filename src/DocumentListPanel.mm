@@ -53,6 +53,15 @@ static void _docFields(EditorView *ed, NSString **outName,
 - (NSMenu *)contextMenuForRow:(NSInteger)row;
 @end
 
+// Name-column cell that exposes its floppy-icon size constraints so they can be
+// rescaled when the panel is zoomed in/out (the icon tracks the row's font size).
+@interface _NppDocNameCell : NSTableCellView
+@property (nonatomic, strong) NSLayoutConstraint *iconW;
+@property (nonatomic, strong) NSLayoutConstraint *iconH;
+@end
+@implementation _NppDocNameCell
+@end
+
 // ─────────────────────────────────────────────────────────────────────────────
 #pragma mark - DocumentListPanel
 
@@ -99,7 +108,7 @@ static void _docFields(EditorView *ed, NSString **outName,
     table.ownerPanel = self;
     _tableView = table;
     _tableView.headerView = [[NSTableHeaderView alloc] init];
-    _tableView.rowHeight = _panelFontSize + 8;
+    _tableView.rowHeight = _panelFontSize + 6;
     _tableView.dataSource = self;
     _tableView.delegate = self;
     _tableView.allowsEmptySelection = YES;
@@ -185,12 +194,20 @@ static void _docFields(EditorView *ed, NSString **outName,
 }
 
 - (void)reloadData {
-    _items = [_tabManager.allEditors copy];
+    // Prefer the delegate's cross-view editor list (primary + split panes) so
+    // tabs moved to another view still appear; fall back to the primary manager.
+    NSArray<EditorView *> *editors = nil;
+    if ([self.delegate respondsToSelector:@selector(documentListPanelEditors:)])
+        editors = [self.delegate documentListPanelEditors:self];
+    _items = [(editors ?: _tabManager.allEditors) copy];
     [self _resort];
 
     [_tableView reloadData];
 
-    EditorView *current = _tabManager.currentEditor;
+    EditorView *current = nil;
+    if ([self.delegate respondsToSelector:@selector(documentListPanelCurrentEditor:)])
+        current = [self.delegate documentListPanelCurrentEditor:self];
+    if (!current) current = _tabManager.currentEditor;
     NSUInteger idx = current ? [_items indexOfObject:current] : NSNotFound;
     if (idx != NSNotFound) {
         [_tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:idx]
@@ -227,7 +244,7 @@ static void _docFields(EditorView *ed, NSString **outName,
 // ── NSTableViewDelegate ───────────────────────────────────────────────────────
 
 - (NSTableCellView *)_makeNameCell {
-    NSTableCellView *cv = [[NSTableCellView alloc] init];
+    _NppDocNameCell *cv = [[_NppDocNameCell alloc] init];
     cv.identifier = @"DocNameCell";
 
     NSImageView *iv = [[NSImageView alloc] init];
@@ -242,16 +259,26 @@ static void _docFields(EditorView *ed, NSString **outName,
     [cv addSubview:tf];
     cv.textField = tf;
 
+    // Stored so the configure pass can rescale the floppy on zoom (default ~30%
+    // smaller than the old 14pt; tracks the font size — see _iconSizeForFont).
+    cv.iconW = [iv.widthAnchor  constraintEqualToConstant:[self _iconSizeForFont]];
+    cv.iconH = [iv.heightAnchor constraintEqualToConstant:[self _iconSizeForFont]];
     [NSLayoutConstraint activateConstraints:@[
         [iv.leadingAnchor  constraintEqualToAnchor:cv.leadingAnchor constant:3],
         [iv.centerYAnchor  constraintEqualToAnchor:cv.centerYAnchor],
-        [iv.widthAnchor    constraintEqualToConstant:14],
-        [iv.heightAnchor   constraintEqualToConstant:14],
+        cv.iconW,
+        cv.iconH,
         [tf.leadingAnchor  constraintEqualToAnchor:iv.trailingAnchor constant:4],
         [tf.trailingAnchor constraintEqualToAnchor:cv.trailingAnchor constant:-3],
         [tf.centerYAnchor  constraintEqualToAnchor:cv.centerYAnchor],
     ]];
     return cv;
+}
+
+// Floppy icon size for the current panel font (~91% of the font; 10pt at the
+// default 11pt font, scaling with zoom in/out).
+- (CGFloat)_iconSizeForFont {
+    return round(_panelFontSize * 10.0 / 11.0);
 }
 
 - (NSTableCellView *)_makeTextCell {
@@ -288,6 +315,13 @@ static void _docFields(EditorView *ed, NSString **outName,
     if ([colId isEqualToString:@"name"]) {
         NSTableCellView *cv = [tableView makeViewWithIdentifier:@"DocNameCell" owner:self];
         if (!cv) cv = [self _makeNameCell];
+        // Rescale the floppy to the current zoom level (cells are reused, so this
+        // runs on every reload — including after a zoom in/out).
+        if ([cv isKindOfClass:[_NppDocNameCell class]]) {
+            CGFloat iconSz = [self _iconSizeForFont];
+            ((_NppDocNameCell *)cv).iconW.constant = iconSz;
+            ((_NppDocNameCell *)cv).iconH.constant = iconSz;
+        }
         cv.toolTip = fullTip;
         cv.imageView.image = [[NppThemeManager shared]
             toolbarIconNamed:(ed.isModified ? @"saveFileRed" : @"saveFile")];
@@ -317,6 +351,10 @@ static void _docFields(EditorView *ed, NSString **outName,
 // Maps a panel row (which may be sorted) back to the tab manager's index.
 - (void)_selectEditorAtRow:(NSInteger)row {
     EditorView *ed = _items[row];
+    // Let the delegate activate it in whichever view owns it (primary or split).
+    if ([self.delegate respondsToSelector:@selector(documentListPanel:activateEditor:)] &&
+        [self.delegate documentListPanel:self activateEditor:ed])
+        return;
     NSUInteger tabIdx = [_tabManager.allEditors indexOfObject:ed];
     if (tabIdx != NSNotFound)
         [_tabManager selectTabAtIndex:(NSInteger)tabIdx];
@@ -371,9 +409,9 @@ static void _docFields(EditorView *ed, NSString **outName,
 #pragma mark - Panel Zoom
 
 - (void)_saveZoom { [[NSUserDefaults standardUserDefaults] setFloat:_panelFontSize forKey:@"PanelZoom_DocumentList"]; }
-- (void)panelZoomIn    { _panelFontSize = MIN(_panelFontSize + 1, 28); _tableView.rowHeight = _panelFontSize + 8; [_tableView reloadData]; [self _saveZoom]; }
-- (void)panelZoomOut   { _panelFontSize = MAX(_panelFontSize - 1, 8);  _tableView.rowHeight = _panelFontSize + 8; [_tableView reloadData]; [self _saveZoom]; }
-- (void)panelZoomReset { _panelFontSize = 11; _tableView.rowHeight = _panelFontSize + 8; [_tableView reloadData]; [self _saveZoom]; }
+- (void)panelZoomIn    { _panelFontSize = MIN(_panelFontSize + 1, 28); _tableView.rowHeight = _panelFontSize + 6; [_tableView reloadData]; [self _saveZoom]; }
+- (void)panelZoomOut   { _panelFontSize = MAX(_panelFontSize - 1, 8);  _tableView.rowHeight = _panelFontSize + 6; [_tableView reloadData]; [self _saveZoom]; }
+- (void)panelZoomReset { _panelFontSize = 11; _tableView.rowHeight = _panelFontSize + 6; [_tableView reloadData]; [self _saveZoom]; }
 @end
 
 // ─────────────────────────────────────────────────────────────────────────────
