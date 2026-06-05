@@ -1607,8 +1607,14 @@ static const CGFloat kTGRadius   = 12.0;  // pill corner radius (rounded, mockup
 }
 
 - (void)_popOverflow:(id)sender {
+    // Drop the menu BELOW the label button so it doesn't cover the group title + ⌄.
+    // popUpMenuPositioningItem treats the location's Y as top-down here, so a POSITIVE
+    // Y moves the menu down on screen. The label button is kTGLabelH tall and sits
+    // kTGPadBot above the capsule's bottom, so ~(kTGLabelH + kTGPadBot) clears the title.
     if (_overflowMenu)
-        [_overflowMenu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, 0) inView:_labelButton];
+        [_overflowMenu popUpMenuPositioningItem:nil
+                                     atLocation:NSMakePoint(0, kTGLabelH + kTGPadBot + 5)
+                                         inView:_labelButton];
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
