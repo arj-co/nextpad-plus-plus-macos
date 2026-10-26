@@ -114,9 +114,6 @@ typedef struct {
 // state: a light theme can sit under dark chrome and vice versa. Views whose
 // body is painted with a theme colour should key off that colour, not -isDark.
 
-/// Aqua or DarkAqua, whichever matches the brightness of `background`. Pin a
-/// view to it so native parts (scrollers, headers) match the theme behind them.
-+ (NSAppearance *)appearanceForBackground:(NSColor *)background;
 
 /// Document Map viewport highlight drawn over a map painted with `background`.
 /// `themeColor` is the theme's "Document map" foreground (the Windows view-zone
